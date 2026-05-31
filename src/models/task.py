@@ -27,6 +27,7 @@ class Task:
     video_hash: str
     original_filename: str
     video_path: str
+    language: str = "zh"
     status: TaskStatus = TaskStatus.PENDING
     stage: ProcessingStage = ProcessingStage.QUEUED
     progress: float = 0.0

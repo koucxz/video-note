@@ -5,19 +5,17 @@ const api = axios.create({
   timeout: 300000,
 });
 
-export const uploadVideo = async (file, onProgress) => {
+export const uploadVideo = async (file, onProgress, language = 'zh') => {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('language', language);
   
   const response = await api.post('/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
-      if (e.total) {
-        onProgress?.(Math.round((e.loaded * 100) / e.total));
-      }
+      if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total));
     }
   });
-  
   return response.data;
 };
 

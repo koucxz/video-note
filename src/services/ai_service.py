@@ -10,7 +10,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 def with_retry(max_retries=3, base_delay=2.0):
-    """重试装饰器，指数退避"""
     def decorator(func):
         async def wrapper(*args, **kwargs):
             last_error = None
@@ -31,21 +30,13 @@ def with_retry(max_retries=3, base_delay=2.0):
 
 class AIProvider(ABC):
     @abstractmethod
-    async def transcribe_audio(self, audio_path: str, language: Optional[str] = None) -> dict:
-        pass
-    
+    async def transcribe_audio(self, audio_path: str, language: Optional[str] = None) -> dict: pass
     @abstractmethod
-    async def analyze_frames(self, frame_paths: List[str], prompt: str) -> str:
-        pass
-    
+    async def analyze_frames(self, frame_paths: List[str], prompt: str) -> str: pass
     @abstractmethod
-    async def generate_outline(self, transcript: str, language: str = "zh") -> dict:
-        pass
-    
+    async def generate_outline(self, transcript: str, language: str = "zh") -> dict: pass
     @abstractmethod
-    async def generate_note(self, outline: dict, context: str) -> str:
-        pass
-
+    async def generate_note(self, outline: dict, context: str, language: str = "zh") -> str: pass
 
 class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str, model: str = "gpt-4o", base_url: str = "https://api.openai.com/v1",
@@ -89,18 +80,29 @@ class OpenAIProvider(AIProvider):
     
     @with_retry(max_retries=3, base_delay=3.0)
     async def generate_outline(self, transcript: str, language: str = "zh") -> dict:
-        logger.info("Generating outline")
+        logger.info(f"Generating outline in {language}")
         max_chars = 10000
         if len(transcript) > max_chars:
             transcript = transcript[:max_chars] + "..."
-        lang_name = "Chinese" if language.startswith("zh") else "English"
-        prompt = f"Generate outline from transcript.\n\nTranscript:\n{transcript}\n\nReturn JSON: {{\"title\": str, \"sections\": [{{\"heading\": str, \"points\": [str]}}]}}"
+        lang_name = "Chinese" if language == "zh" else "English"
+        prompt = f"Generate outline from transcript in {lang_name}.\n\nTranscript:\n{transcript}\n\nReturn JSON: {{\"title\": str, \"sections\": [{{\"heading\": str, \"points\": [str]}}]}}"
         response = await self.client.chat.completions.create(model=self.model, messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
         return json.loads(response.choices[0].message.content)
     
     @with_retry(max_retries=3, base_delay=3.0)
-    async def generate_note(self, outline: dict, context: str) -> str:
-        logger.info("Generating note")
-        prompt = f"Generate detailed video notes from outline and context.\n\nOutline:\n{json.dumps(outline, ensure_ascii=False, indent=2)}\n\nContext:\n{context}\n\nOutput in Markdown format:"
+    async def generate_note(self, outline: dict, context: str, language: str = "zh") -> str:
+        logger.info(f"Generating note in {language}")
+        lang_instruction = "请使用中文生成笔记" if language == "zh" else "Please generate the note in English"
+        prompt = f"""Generate detailed video notes.
+
+{lang_instruction}
+
+Outline:
+{json.dumps(outline, ensure_ascii=False, indent=2)}
+
+Context:
+{context}
+
+Output in Markdown format:"""
         response = await self.client.chat.completions.create(model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=8192)
         return response.choices[0].message.content
