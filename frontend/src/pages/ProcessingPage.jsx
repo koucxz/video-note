@@ -1,13 +1,18 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, ArrowLeft } from 'lucide-react'
 import { getTaskStatus, retryTask } from '../api/client'
 import StageProgress from '../components/StageProgress'
+import { useLang } from '../context/LangContext'
 
 function ProcessingPage() {
   const { taskId } = useParams()
   const navigate = useNavigate()
+  const { t } = useLang()
   const [status, setStatus] = useState(null)
+  const [retryCount, setRetryCount] = useState(0)
+  const maxRetries = 3
+  const retryingRef = useRef(false)
 
   useEffect(() => {
     const timer = setInterval(async () => {
@@ -20,98 +25,101 @@ function ProcessingPage() {
           setTimeout(() => navigate(`/note/${taskId}`), 2000)
         } else if (data.status === 'failed') {
           clearInterval(timer)
+          // 自动重试
+          if (retryCount < maxRetries && !retryingRef.current) {
+            retryingRef.current = true
+            setRetryCount(prev => prev + 1)
+            setTimeout(async () => {
+              try {
+                await retryTask(taskId)
+                retryingRef.current = false
+                // 重新开始轮询
+                window.location.reload()
+              } catch (err) {
+                retryingRef.current = false
+                console.error('Auto retry failed:', err)
+              }
+            }, 3000)
+          }
         }
       } catch (err) {
-        console.error('Status error:', err)
+        console.error(err)
       }
     }, 2000)
 
     return () => clearInterval(timer)
-  }, [taskId, navigate])
+  }, [taskId, navigate, retryCount])
 
-  const handleRetry = async () => {
+  const handleManualRetry = async () => {
     try {
       await retryTask(taskId)
-      setStatus(null)
+      setRetryCount(0)
       window.location.reload()
     } catch (err) {
-      alert('Retry failed: ' + err.message)
+      alert(t.retryFailed + ': ' + err.message)
     }
   }
 
   if (!status) {
     return (
-      <div style={{ textAlign: 'center', padding: '80px 0' }}>
-        <Loader2 size={48} className="animate-spin" color="var(--primary)" />
-        <p style={{ marginTop: '16px', color: 'var(--text-secondary)' }}>加载中...</p>
+      <div style={{ textAlign: 'center', padding: '120px 0' }}>
+        <Loader2 size={40} className="animate-spin" color="var(--primary)" />
       </div>
     )
   }
 
   const isCompleted = status.status === 'completed'
   const isFailed = status.status === 'failed'
+  const isAutoRetrying = isFailed && retryCount < maxRetries && retryCount > 0
 
   return (
-    <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-      {/* 返回按钮 */}
-      <button 
-        className="btn btn-secondary" 
-        style={{ marginBottom: '24px' }}
-        onClick={() => navigate('/history')}
-      >
-        <ArrowLeft size={16} />
-        返回历史
+    <div style={{ maxWidth: '700px' }}>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: '20px' }}
+        onClick={() => navigate('/history')}>
+        <ArrowLeft size={16} /> {t.back}
       </button>
 
-      {/* 文件名 */}
-      <h1 style={{ 
-        fontSize: '20px', 
-        fontWeight: '600', 
-        marginBottom: '24px',
-        wordBreak: 'break-all'
-      }}>
+      <h1 className="page-title" style={{ marginBottom: '8px', fontSize: '18px' }}>
         {status.filename}
       </h1>
+      <p className="page-subtitle" style={{ marginBottom: '32px' }}>
+        {isCompleted ? t.completed : isFailed ? (isAutoRetrying ? `${t.autoRetry} (${retryCount}/${maxRetries})` : t.processFailed) : t.processingWait}
+      </p>
 
-      {/* 进度卡片 */}
-      <div className="card">
+      {/* 横向进度条 */}
+      <div className="card" style={{ padding: '32px 24px' }}>
         <StageProgress currentStage={status.stage} status={status.status} />
-        
-        {/* 状态消息 */}
-        <div style={{ 
-          marginTop: '24px', 
-          padding: '16px',
-          borderRadius: '12px',
-          background: isCompleted ? 'var(--success-light)' : 
-                     isFailed ? 'var(--error-light)' : 'var(--bg)',
-          textAlign: 'center'
-        }}>
-          {isCompleted ? (
-            <div>
-              <div style={{ fontSize: '24px', marginBottom: '8px' }}>🎉</div>
-              <p style={{ fontWeight: '500', color: 'var(--success)' }}>
-                处理完成！正在跳转到笔记...
-              </p>
-            </div>
-          ) : isFailed ? (
-            <div>
-              <p style={{ fontWeight: '500', color: 'var(--error)', marginBottom: '12px' }}>
-                处理失败
-              </p>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                {status.error || '未知错误'}
-              </p>
-              <button className="btn btn-primary" onClick={handleRetry}>
-                <RefreshCw size={16} />
-                重试
-              </button>
-            </div>
-          ) : (
-            <p style={{ color: 'var(--text-secondary)' }}>
-              正在处理中，请稍候...
-            </p>
-          )}
-        </div>
+      </div>
+
+      {/* 状态消息 */}
+      <div className="card" style={{ marginTop: '16px', textAlign: 'center', padding: '32px' }}>
+        {isCompleted ? (
+          <div>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🎉</div>
+            <p style={{ fontWeight: '600', fontSize: '16px', color: 'var(--success)' }}>{t.processComplete}</p>
+          </div>
+        ) : isFailed ? (
+          <div>
+            {isAutoRetrying ? (
+              <>
+                <Loader2 size={32} className="animate-spin" color="var(--primary)" />
+                <p style={{ marginTop: '12px', fontWeight: '500', color: 'var(--primary)' }}>
+                  {t.autoRetry} ({retryCount}/{maxRetries})
+                </p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontWeight: '500', color: 'var(--error)', marginBottom: '12px' }}>{t.processFailed}</p>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>{status.error}</p>
+                <button className="btn btn-primary" onClick={handleManualRetry}>
+                  <RefreshCw size={16} /> {t.retry}
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <Loader2 size={32} className="animate-spin" color="var(--primary)" />
+        )}
       </div>
     </div>
   )
