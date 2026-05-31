@@ -1,0 +1,44 @@
+# VideoNote config
+# Copy to config.yaml and fill in your API keys
+
+app:
+  name: VideoNote
+  version: 1.1.0
+
+server:
+  host: ${VIDEONOTE_HOST:-0.0.0.0}
+  port: ${VIDEONOTE_PORT:-8000}
+
+storage:
+  db_path: ./data/db/videonote.db
+  upload_dir: ./data/uploads
+  output_dir: ./data/output
+
+provider:
+  type: openai
+  api_key: ${LLM_API_KEY}
+  model: ${LLM_MODEL:-gpt-5.5}
+  base_url: ${LLM_BASE_URL:-https://api.openai.com/v1}
+
+vlm:
+  type: openai
+  api_key: ${VLM_API_KEY}
+  model: ${VLM_MODEL:-gpt-5.5}
+  base_url: ${VLM_BASE_URL:-https://api.openai.com/v1}
+
+asr:
+  enabled: ${ASR_ENABLED:-false}
+  api_key: ${ASR_API_KEY}
+  model: ${ASR_MODEL:-whisper-1}
+  base_url: ${ASR_BASE_URL:-https://api.openai.com/v1}
+
+processing:
+  segment_duration: 300
+  keyframe_interval: 30
+  max_retries: 3
+  retry_delay: 2.0
+  max_concurrent_tasks: ${MAX_CONCURRENT_TASKS:-2}
+
+language:
+  detect: true
+  default: zh

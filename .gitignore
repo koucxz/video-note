@@ -1,0 +1,12 @@
+﻿# VideoNote
+.env
+__pycache__/
+*.pyc
+data/db/*.db
+data/uploads/*
+data/output/*
+data/temp/*
+!data/uploads/.gitkeep
+!data/output/.gitkeep
+node_modules/
+dist/
