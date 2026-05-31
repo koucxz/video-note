@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trash2, Eye, RefreshCw, Loader2, Clock, CheckCircle2, XCircle, History } from 'lucide-react'
+import { Trash2, Eye, RefreshCw, Loader2, Clock, CheckCircle2, XCircle, History, ArrowUpRight } from 'lucide-react'
 import { getHistory, deleteTask, retryTask } from '../api/client'
 import { useLang } from '../context/LangContext'
 
@@ -18,21 +18,22 @@ function HistoryPage() {
     finally { setLoading(false) }
   }
 
-  const handleDelete = async (taskId) => {
+  const handleDelete = async (e, taskId) => {
+    e.stopPropagation()
     if (!confirm(t.confirmDelete)) return
-    try { await deleteTask(taskId); setHistory(history.filter(t => t.task_id !== taskId)) }
-    catch (err) { alert(t.deleteFailed + ': ' + err.message) }
+    try { await deleteTask(taskId); setHistory(history.filter(i => i.task_id !== taskId)) }
+    catch (err) { alert(t.deleteFailed) }
   }
 
-  const handleRetry = async (taskId) => {
+  const handleRetry = async (e, taskId) => {
+    e.stopPropagation()
     try { await retryTask(taskId); loadHistory() }
-    catch (err) { alert(t.retryFailed + ': ' + err.message) }
+    catch (err) { alert(t.retryFailed) }
   }
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''
-    const d = new Date(dateStr); const now = new Date()
-    const mins = Math.floor((now - d) / 60000)
+    const mins = Math.floor((Date.now() - new Date(dateStr)) / 60000)
     if (mins < 1) return t.justNow
     if (mins < 60) return `${mins} ${t.minsAgo}`
     const hours = Math.floor(mins / 60)
@@ -40,69 +41,65 @@ function HistoryPage() {
     return `${Math.floor(hours / 24)} ${t.daysAgo}`
   }
 
-  const statusConfig = {
+  const statusMap = {
     completed: { icon: CheckCircle2, color: 'var(--success)', bg: 'var(--success-light)', label: t.completed },
     failed: { icon: XCircle, color: 'var(--error)', bg: 'var(--error-light)', label: t.failed },
     processing: { icon: Loader2, color: 'var(--primary)', bg: 'var(--primary-light)', label: t.processing },
     pending: { icon: Clock, color: 'var(--text-muted)', bg: 'var(--bg)', label: t.pending },
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: '120px 0' }}><Loader2 size={40} className="animate-spin" color="var(--primary)" /></div>
+  if (loading) return <div style={{ textAlign: 'center', padding: '120px 0' }}><Loader2 size={36} className="animate-spin" color="var(--primary)" /></div>
 
   return (
-    <div style={{ maxWidth: '700px' }}>
+    <div style={{ maxWidth: '680px' }}>
       <div className="page-header">
         <h1 className="page-title">{t.history}</h1>
         <p className="page-subtitle">{t.totalRecords} {history.length} {t.records}</p>
       </div>
 
       {history.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '60px 24px' }}>
-          <div style={{ width: 64, height: 64, borderRadius: 20, background: 'var(--primary-light)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-            <History size={32} color="var(--primary)" />
+        <div className="card" style={{ textAlign: 'center', padding: '56px 24px' }}>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: 'var(--primary-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+            <History size={28} color="var(--primary)" />
           </div>
-          <p style={{ fontWeight: '500', marginBottom: '4px' }}>{t.noRecords}</p>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>{t.uploadFirst}</p>
+          <p style={{ fontWeight: '600', fontSize: '15px', marginBottom: '4px' }}>{t.noRecords}</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>{t.uploadFirst}</p>
           <button className="btn btn-primary" onClick={() => navigate('/')}>{t.upload}</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {history.map((item) => {
-            const config = statusConfig[item.status] || statusConfig.pending
-            const StatusIcon = config.icon
+            const s = statusMap[item.status] || statusMap.pending
+            const Icon = s.icon
             return (
-              <div key={item.task_id} className="card animate-in" style={{
-                padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px',
-                cursor: item.status === 'completed' ? 'pointer' : 'default'
-              }} onClick={() => item.status === 'completed' && navigate(`/note/${item.task_id}`)}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: config.bg,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <StatusIcon size={20} color={config.color} className={item.status === 'processing' ? 'animate-spin' : ''} />
+              <div key={item.task_id} className="history-item animate-in"
+                onClick={() => item.status === 'completed' && navigate(`/note/${item.task_id}`)}>
+                <div className="history-icon" style={{ background: s.bg }}>
+                  <Icon size={20} color={s.color} className={item.status === 'processing' ? 'animate-spin' : ''} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: '500', fontSize: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: '14px', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {item.videoName}
                   </div>
-                  <div style={{ display: 'flex', gap: '10px', fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  <div style={{ display: 'flex', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
                     <span>{formatDate(item.createdAt)}</span>
-                    <span style={{ color: config.color }}>{config.label}</span>
+                    <span style={{ color: s.color }}>{s.label}</span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                   {item.status === 'completed' && (
-                    <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/note/${item.task_id}`)}>
-                      <Eye size={16} /> {t.view}
+                    <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}>
+                      <ArrowUpRight size={14} /> {t.view}
                     </button>
                   )}
                   {item.status === 'failed' && (
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleRetry(item.task_id)}>
-                      <RefreshCw size={16} />
+                    <button className="btn btn-ghost btn-sm" onClick={(e) => handleRetry(e, item.task_id)}>
+                      <RefreshCw size={14} />
                     </button>
                   )}
-                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }}
-                    onClick={() => handleDelete(item.task_id)}>
-                    <Trash2 size={16} />
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text-muted)' }} onClick={(e) => handleDelete(e, item.task_id)}>
+                    <Trash2 size={14} />
                   </button>
                 </div>
               </div>
