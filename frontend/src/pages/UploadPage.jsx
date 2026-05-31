@@ -1,66 +1,78 @@
-﻿import { useState, useRef } from 'react'
+﻿import { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileVideo, Loader2 } from 'lucide-react'
+import { Upload, FileVideo, Loader2, X, Plus, CheckCircle2 } from 'lucide-react'
 import { uploadVideo } from '../api/client'
 
 function UploadPage() {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
 
-  const handleFileSelect = (e) => {
-    const selected = e.target.files[0]
-    if (selected) {
-      setFile(selected)
-      setError(null)
-    }
+  const addFiles = useCallback((newFiles) => {
+    const videoFiles = Array.from(newFiles).filter(f => 
+      /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v)$/i.test(f.name)
+    )
+    setFiles(prev => {
+      const existing = new Set(prev.map(f => f.name + f.size))
+      const unique = videoFiles.filter(f => !existing.has(f.name + f.size))
+      return [...prev, ...unique]
+    })
+  }, [])
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
-    const dropped = e.dataTransfer.files[0]
-    if (dropped) {
-      setFile(dropped)
-      setError(null)
-    }
+    addFiles(e.dataTransfer.files)
   }
 
-  const handleUpload = async () => {
-    if (!file) return
-    
+  const handleUploadAll = async () => {
+    if (files.length === 0) return
     setUploading(true)
-    setError(null)
     
-    try {
-      const result = await uploadVideo(file, setProgress)
-      navigate(`/processing/${result.task_id}`)
-    } catch (err) {
-      setError(err.message || '上传失败')
-    } finally {
-      setUploading(false)
+    const results = []
+    for (const file of files) {
+      try {
+        const result = await uploadVideo(file, () => {})
+        results.push({ ...result, filename: file.name })
+      } catch (err) {
+        results.push({ filename: file.name, error: err.message })
+      }
+    }
+    
+    setUploading(false)
+    
+    if (results.length === 1 && results[0].task_id) {
+      navigate(`/processing/${results[0].task_id}`)
+    } else {
+      navigate('/history')
     }
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '28px', fontWeight: '600', marginBottom: '8px' }}>
-        上传视频
-      </h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>
-        支持 MP4, AVI, MOV, MKV 等格式
-      </p>
+    <div style={{ maxWidth: '640px', margin: '0 auto' }}>
+      <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+        <h1 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '8px' }}>
+          上传视频
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '15px' }}>
+          支持 MP4, AVI, MOV, MKV 等格式，可同时上传多个
+        </p>
+      </div>
 
+      {/* 拖拽区域 */}
       <div
         className="card"
         style={{
           border: '2px dashed var(--border)',
           textAlign: 'center',
-          padding: '48px',
+          padding: '40px',
           cursor: 'pointer',
-          transition: 'border-color 0.2s'
+          transition: 'all 0.2s',
+          background: files.length > 0 ? 'var(--bg)' : 'var(--card-bg)'
         }}
         onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => e.preventDefault()}
@@ -70,76 +82,115 @@ function UploadPage() {
           ref={fileInputRef}
           type="file"
           accept="video/*"
-          onChange={handleFileSelect}
+          multiple
+          onChange={(e) => addFiles(e.target.files)}
           style={{ display: 'none' }}
         />
         
-        {file ? (
-          <div>
-            <FileVideo size={48} color="var(--primary)" />
-            <p style={{ marginTop: '16px', fontWeight: '500' }}>{file.name}</p>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-              {(file.size / 1024 / 1024).toFixed(2)} MB
-            </p>
-          </div>
-        ) : (
-          <div>
-            <Upload size={48} color="var(--text-secondary)" />
-            <p style={{ marginTop: '16px' }}>
-              点击或拖拽视频文件到此处
-            </p>
-          </div>
-        )}
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: 16,
+          background: 'var(--primary-light)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 16px'
+        }}>
+          <Plus size={28} color="var(--primary)" />
+        </div>
+        <p style={{ fontWeight: '500', marginBottom: '4px' }}>
+          点击或拖拽视频文件到此处
+        </p>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+          可以一次选择多个文件
+        </p>
       </div>
 
-      {error && (
-        <div style={{
-          marginTop: '16px',
-          padding: '12px',
-          background: '#fef2f2',
-          borderRadius: '8px',
-          color: 'var(--error)'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {uploading && (
+      {/* 文件列表 */}
+      {files.length > 0 && (
         <div style={{ marginTop: '16px' }}>
-          <div style={{
-            height: '8px',
-            background: 'var(--border)',
-            borderRadius: '4px',
-            overflow: 'hidden'
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: '12px' 
           }}>
-            <div style={{
-              height: '100%',
-              background: 'var(--primary)',
-              width: `${progress}%`,
-              transition: 'width 0.3s'
-            }} />
+            <span style={{ fontWeight: '500', fontSize: '14px' }}>
+              已选择 {files.length} 个文件
+            </span>
+            <button 
+              className="btn btn-secondary" 
+              style={{ fontSize: '13px', padding: '6px 12px' }}
+              onClick={() => setFiles([])}
+            >
+              清空
+            </button>
           </div>
-          <p style={{ marginTop: '8px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            上传中... {progress}%
-          </p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {files.map((file, index) => (
+              <div 
+                key={index} 
+                className="card"
+                style={{ 
+                  padding: '12px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px'
+                }}
+              >
+                <FileVideo size={20} color="var(--primary)" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ 
+                    fontWeight: '500', 
+                    fontSize: '14px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {file.name}
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
+                    {(file.size / 1024 / 1024).toFixed(1)} MB
+                  </div>
+                </div>
+                <button
+                  className="btn btn-danger"
+                  style={{ padding: '6px', borderRadius: '8px' }}
+                  onClick={(e) => { e.stopPropagation(); removeFile(index) }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* 上传按钮 */}
       <button
         className="btn btn-primary"
-        style={{ width: '100%', marginTop: '24px', justifyContent: 'center' }}
-        onClick={handleUpload}
-        disabled={!file || uploading}
+        style={{ 
+          width: '100%', 
+          marginTop: '24px', 
+          justifyContent: 'center',
+          padding: '14px',
+          fontSize: '15px',
+          borderRadius: '12px'
+        }}
+        onClick={handleUploadAll}
+        disabled={files.length === 0 || uploading}
       >
         {uploading ? (
           <>
-            <Loader2 size={16} className="animate-spin" />
+            <Loader2 size={18} className="animate-spin" />
             上传中...
           </>
         ) : (
           <>
-            <Upload size={16} />
-            开始处理
+            <Upload size={18} />
+            开始处理 {files.length > 0 && `(${files.length} 个文件)`}
           </>
         )}
       </button>
