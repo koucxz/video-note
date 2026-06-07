@@ -1,0 +1,81 @@
+/* ============================================================
+   VideoNote — Design Tokens
+   --vn-* prefix for all design system variables
+   ============================================================ */
+
+:root {
+  /* ---- Colors: Neutral ---- */
+  --vn-bg: #f5f8fc;
+  --vn-surface: #ffffff;
+  --vn-surface-2: #f8fafc;
+  --vn-surface-3: #f1f5f9;
+  --vn-text: #1e293b;
+  --vn-text-2: #334155;
+  --vn-muted: #64748b;
+  --vn-faint: #94a3b8;
+  --vn-border: #e2e8f0;
+  --vn-border-strong: #cbd5e1;
+
+  /* ---- Colors: Primary (Blue) ---- */
+  --vn-primary: #4f8ef7;
+  --vn-primary-strong: #3a6fd8;
+  --vn-primary-soft: #eef4ff;
+  --vn-primary-fg: #ffffff;
+
+  /* ---- Colors: Semantic ---- */
+  --vn-ok: #10b981;
+  --vn-ok-soft: #ecfdf5;
+  --vn-ok-strong: #059669;
+  --vn-warn: #f59e0b;
+  --vn-warn-soft: #fffbeb;
+  --vn-danger: #ef4444;
+  --vn-danger-soft: #fef2f2;
+  --vn-danger-strong: #dc2626;
+
+  /* ---- Radius ---- */
+  --vn-r-sm: 8px;
+  --vn-r: 12px;
+  --vn-r-lg: 16px;
+  --vn-r-xl: 20px;
+  --vn-r-pill: 999px;
+
+  /* ---- Shadows ---- */
+  --vn-shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --vn-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --vn-shadow-md: 0 4px 16px rgba(0,0,0,0.06);
+  --vn-shadow-lg: 0 8px 30px rgba(0,0,0,0.08);
+  --vn-shadow-xl: 0 20px 60px rgba(0,0,0,0.12);
+
+  /* ---- Spacing ---- */
+  --vn-sp-1: 4px;
+  --vn-sp-2: 8px;
+  --vn-sp-3: 12px;
+  --vn-sp-4: 16px;
+  --vn-sp-5: 20px;
+  --vn-sp-6: 24px;
+  --vn-sp-8: 32px;
+  --vn-sp-10: 40px;
+  --vn-sp-12: 48px;
+  --vn-sp-16: 64px;
+
+  /* ---- Typography ---- */
+  --vn-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --vn-font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --vn-fs-xs: 11px;
+  --vn-fs-sm: 12px;
+  --vn-fs-base: 13px;
+  --vn-fs-md: 14px;
+  --vn-fs-lg: 16px;
+  --vn-fs-xl: 18px;
+  --vn-fs-2xl: 20px;
+  --vn-fs-3xl: 24px;
+  --vn-lh-tight: 1.3;
+  --vn-lh-normal: 1.5;
+  --vn-lh-relaxed: 1.7;
+
+  /* ---- Transitions ---- */
+  --vn-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --vn-dur-fast: 0.12s;
+  --vn-dur: 0.2s;
+  --vn-dur-slow: 0.35s;
+}
