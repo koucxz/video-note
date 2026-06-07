@@ -1,69 +1,40 @@
-﻿import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { useLang } from '../context/LangContext'
 
-const STAGES_ZH = [
-  { key: 'extracting_audio', label: '提取音频' },
-  { key: 'transcribing', label: '语音识别' },
-  { key: 'generating_outline', label: '生成大纲' },
-  { key: 'extracting_keyframes', label: '提取关键帧' },
-  { key: 'analyzing_content', label: '分析内容' },
-  { key: 'generating_note', label: '生成笔记' },
-  { key: 'completed', label: '完成' },
-]
-
-const STAGES_EN = [
-  { key: 'extracting_audio', label: 'Audio' },
-  { key: 'transcribing', label: 'Transcribe' },
-  { key: 'generating_outline', label: 'Outline' },
-  { key: 'extracting_keyframes', label: 'Frames' },
-  { key: 'analyzing_content', label: 'Analyze' },
-  { key: 'generating_note', label: 'Note' },
-  { key: 'completed', label: 'Done' },
-]
-
 function StageProgress({ currentStage, status }) {
-  const { lang } = useLang()
-  const STAGES = lang === 'zh' ? STAGES_ZH : STAGES_EN
-  const currentIndex = STAGES.findIndex(s => s.key === currentStage)
-  const isFailed = status === 'failed'
-  const isCompleted = status === 'completed'
-  
+  const { t } = useLang()
+  const STAGES = [
+    { key:'extracting_audio', label:t.extractAudio },
+    { key:'transcribing', label:t.transcribe },
+    { key:'generating_outline', label:t.genOutline },
+    { key:'extracting_keyframes', label:t.extractFrames },
+    { key:'analyzing_content', label:t.analyzeContent },
+    { key:'generating_note', label:t.genNote },
+    { key:'completed', label:t.done },
+  ]
+  const idx = STAGES.findIndex(s=>s.key===currentStage)
+  const fail = status==='failed'
+  const done = status==='completed'
+
   return (
-    <div className="progress-bar-container">
-      {STAGES.map((stage, index) => {
-        const isDone = isCompleted || index < currentIndex
-        const isCurrent = !isCompleted && !isFailed && index === currentIndex
-        const isFailedStage = isFailed && index === currentIndex
-        const isLast = index === STAGES.length - 1
-        
+    <div className="steps">
+      {STAGES.map((s,i) => {
+        const isDone = done || i<idx
+        const isNow = !done && !fail && i===idx
+        const isFail = fail && i===idx
+        const last = i===STAGES.length-1
+
         return (
-          <div key={stage.key} className="progress-step">
-            {/* 连接线 */}
-            {!isLast && (
-              <div className={`progress-line ${isDone ? 'done' : ''}`} />
-            )}
-            
-            {/* 圆点 */}
-            <div className="progress-dot" style={{
-              background: isDone ? 'var(--primary)' : 
-                         isCurrent ? 'var(--primary-50)' : 'var(--card-bg)',
-              border: isDone ? 'none' : 
-                     isCurrent ? '2px solid var(--primary)' : 
-                     isFailedStage ? '2px solid var(--error)' : '2px solid var(--border)',
-              color: isDone ? 'white' : 
-                     isCurrent ? 'var(--primary)' : 
-                     isFailedStage ? 'var(--error)' : 'var(--text-muted)',
+          <div key={s.key} className="step">
+            {!last && <div className={`step-line ${isDone?'done':''}`}/>}
+            <div className="step-dot" style={{
+              background: isDone?'var(--blue)':isNow?'var(--blue-light)':'var(--white)',
+              border: isDone?'none':isNow?'2px solid var(--blue)':isFail?'2px solid var(--red)':'2px solid var(--gray-200)',
+              color: isDone?'white':isNow?'var(--blue)':isFail?'var(--red)':'var(--gray-400)',
             }}>
-              {isDone ? <CheckCircle2 size={16} /> :
-               isCurrent ? <Loader2 size={16} className="animate-spin" /> :
-               isFailedStage ? <XCircle size={16} /> :
-               <span>{index + 1}</span>}
+              {isDone ? <CheckCircle2 size={14}/> : isNow ? <Loader2 size={14} className="spin"/> : isFail ? <XCircle size={14}/> : <span>{i+1}</span>}
             </div>
-            
-            {/* 标签 */}
-            <div className={`progress-label ${isCurrent ? 'active' : ''}`}>
-              {stage.label}
-            </div>
+            <div className={`step-text ${isNow?'now':''}`}>{s.label}</div>
           </div>
         )
       })}

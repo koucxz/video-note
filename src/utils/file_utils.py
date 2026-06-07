@@ -1,4 +1,4 @@
-﻿"""文件工具"""
+"""文件工具"""
 from pathlib import Path
 
 def ensure_dir(path: str) -> Path:

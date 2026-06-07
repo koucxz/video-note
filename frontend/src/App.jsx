@@ -1,64 +1,45 @@
-﻿import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Upload, History, Sparkles, Languages, Globe } from 'lucide-react'
-import { LangProvider, useLang } from './context/LangContext'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { LangProvider } from './context/LangContext'
+import { ToastProvider, useToast } from './context/ToastContext'
+import { setToastHandler } from './api/client'
+import ErrorBoundary from './components/ErrorBoundary'
+import Header from './components/Header'
 import UploadPage from './pages/UploadPage'
-import ProcessingPage from './pages/ProcessingPage'
 import HistoryPage from './pages/HistoryPage'
 import NotePage from './pages/NotePage'
+import ProcessingPage from './pages/ProcessingPage'
+import SettingsPage from './pages/SettingsPage'
+import CollectionsPage from './pages/CollectionsPage'
+import FlashcardPage from './pages/FlashcardPage'
+import ModelConfigPage from './pages/ModelConfigPage'
 
-function Sidebar() {
-  const location = useLocation()
-  const { lang, toggleLang, t } = useLang()
-  
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">V</div>
-        <div>
-          <div className="sidebar-logo-text">{t.appName}</div>
-          <div className="sidebar-logo-desc">{t.appDesc}</div>
-        </div>
-      </div>
-      
-      <nav className="sidebar-nav">
-        <Link to="/" className={`sidebar-link ${location.pathname === '/' ? 'active' : ''}`}>
-          <Upload size={18} />
-          <span>{t.upload}</span>
-        </Link>
-        <Link to="/history" className={`sidebar-link ${location.pathname.startsWith('/history') || location.pathname.startsWith('/note') || location.pathname.startsWith('/processing') ? 'active' : ''}`}>
-          <History size={18} />
-          <span>{t.history}</span>
-        </Link>
-      </nav>
-      
-      <div className="sidebar-footer">
-        <button className="lang-toggle" onClick={toggleLang}>
-          <Globe size={16} />
-          <span>{lang === 'zh' ? '中文' : 'English'}</span>
-          <span className="lang-badge">{lang === 'zh' ? 'EN' : '中'}</span>
-        </button>
-      </div>
-    </aside>
-  )
+function ToastConnector() {
+  const toast = useToast()
+  setToastHandler(toast)
+  return null
 }
 
 function App() {
   return (
-    <LangProvider>
+    <ToastProvider><LangProvider>
       <BrowserRouter>
-        <div className="app-layout">
-          <Sidebar />
-          <main className="main-content animate-in">
+        <Header />
+        <main style={{ maxWidth: 1280, margin: '0 auto', padding: '16px 24px 40px' }}>
+          <ErrorBoundary>
             <Routes>
               <Route path="/" element={<UploadPage />} />
-              <Route path="/processing/:taskId" element={<ProcessingPage />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/note/:taskId" element={<NotePage />} />
+              <Route path="/processing/:taskId" element={<ProcessingPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/collections" element={<CollectionsPage />} />
+              <Route path="/flashcards/:taskId" element={<FlashcardPage />} />
+              <Route path="/settings/models" element={<ModelConfigPage />} />
             </Routes>
-          </main>
-        </div>
+          </ErrorBoundary>
+        </main>
       </BrowserRouter>
-    </LangProvider>
+    <ToastConnector /></LangProvider></ToastProvider>
   )
 }
 

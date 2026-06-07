@@ -1,8 +1,12 @@
-﻿# VideoNote Python 依赖
-fastapi==0.115.0
-uvicorn==0.30.0
-python-multipart==0.0.9
-pydantic==2.9.0
-pyyaml==6.0.2
-openai==1.50.0
-aiofiles==24.1.0
+# VideoNote Python dependencies
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+pydantic>=2.9.0,<3.0
+pyyaml>=6.0.2
+openai>=1.50.0
+aiofiles>=24.1.0
+aiosqlite>=0.20.0
+python-dotenv>=1.0.1
+anthropic>=0.40.0
+python-docx>=1.0.0

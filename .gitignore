@@ -1,5 +1,7 @@
 ﻿# VideoNote
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 data/db/*.db
@@ -10,3 +12,13 @@ data/temp/*
 !data/output/.gitkeep
 node_modules/
 dist/
+
+# Runtime / dev artifacts
+backend_*.log
+*.log
+check.txt
+check_err.txt
+fix_*.js
+start-backend.ps1
+.pytest_cache/
+.coverage

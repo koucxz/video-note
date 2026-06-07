@@ -1,47 +1,43 @@
-﻿# 🎬 VideoNote - 智能视频笔记生成器
+# VideoNote - Smart Video Notes Generator
 
-将视频内容自动转化为结构化笔记的工具。
+Convert videos into structured notes using cloud AI (no local models needed).
 
-## ✨ 特性
+## Features
 
-- 🤖 **AI 驱动**: 使用云端 AI API（OpenAI GPT-4o + Whisper）
-- 🔄 **断点续传**: 支持长视频处理中断后恢复
-- 📁 **文件去重**: 基于内容 hash 自动去重
-- 📝 **结构化输出**: 生成 Markdown 格式笔记
-- ⚙️ **可配置**: 支持多种 AI 提供商
+- **No Local AI Models**: Uses cloud APIs exclusively (LLM + VLM). No GPU, no Whisper dependency.
+- **ASR Optional**: If your provider lacks Whisper-compatible audio transcription, the engine falls back to pure VLM keyframe analysis.
+- **Streaming Upload**: Large files (500MB+) upload without consuming memory.
+- **File Deduplication**: Same video uploaded twice won't create duplicate files or tasks.
+- **Checkpoint Resume**: If processing is interrupted (service restart, network issue), click "Retry" to resume from the last completed stage.
+- **Concurrency Control**: Configurable limit on simultaneous video processing tasks.
+- **5 Note Styles**: Standard, Summary, Action Checklist, Academic, Creative.
+- **Bilingual**: Chinese and English UI and output.
+- **Docker Ready**: One-command deployment with docker-compose.
 
-## 📋 前置要求
+## Quick Start
+
+### Prerequisites
 
 - Python 3.10+
 - Node.js 18+
-- FFmpeg（用于音视频处理）
-- OpenAI API Key
+- FFmpeg (must be on PATH)
+- API key for an OpenAI-compatible provider (e.g., OpenAI, DeepSeek)
 
-## 🚀 快速开始
-
-### 1. 安装后端依赖
-
-```bash
-cd D:/code/video-note
-pip install -r requirements.txt
-```
-
-### 2. 配置环境变量
-
-复制 `.env.example` 为 `.env` 并填入 API Key：
+### 1. Configure API Keys
 
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填入 OPENAI_API_KEY
+# Edit .env with your actual API key and base URL
 ```
 
-### 3. 启动后端服务
+### 2. Start Backend
 
 ```bash
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+pip install -r requirements.txt
+python -m uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. 安装并启动前端
+### 3. Start Frontend
 
 ```bash
 cd frontend
@@ -49,68 +45,85 @@ npm install
 npm run dev
 ```
 
-前端将在 http://localhost:3000 启动。
+Frontend runs at http://localhost:3000. API docs at http://localhost:8000/docs.
 
-## 📁 项目结构
-
-```
-video-note/
-├── src/
-│   ├── core/           # 核心引擎
-│   │   ├── engine.py   # 主处理引擎
-│   │   ├── checkpoint.py # 断点续传
-│   │   └── dedup.py    # 文件去重
-│   ├── services/       # 服务层
-│   │   ├── ai_service.py  # AI 模型调用
-│   │   ├── audio_service.py # 音频处理
-│   │   └── video_service.py # 视频处理
-│   ├── api/            # API 路由
-│   ├── models/         # 数据模型
-│   └── config/         # 配置
-├── frontend/           # React 前端
-├── data/               # 数据目录
-│   ├── db/             # 数据库
-│   ├── uploads/        # 上传文件
-│   └── output/         # 输出笔记
-├── config.yaml         # 配置文件
-└── requirements.txt    # Python 依赖
-```
-
-## 🔧 配置说明
-
-编辑 `config.yaml` 自定义配置：
-
-```yaml
-provider:
-  type: "openai"
-  api_key: "your-api-key"
-  model: "gpt-4o"
-  base_url: "https://api.openai.com/v1"
-
-processing:
-  keyframe_interval: 30  # 关键帧提取间隔（秒）
-  max_retries: 3         # 失败重试次数
-```
-
-## 📖 API 文档
-
-启动后端后访问 http://localhost:8000/docs 查看 API 文档。
-
-### 主要接口
-
-- `POST /api/upload` - 上传视频
-- `GET /api/task/{id}/status` - 获取任务状态
-- `POST /api/task/{id}/retry` - 重试失败任务
-- `GET /api/history` - 获取历史记录
-- `GET /api/note/{id}` - 下载笔记
-
-## 🐳 Docker 部署（可选）
+## Docker Deployment
 
 ```bash
-docker build -t videonote .
-docker run -p 8000:8000 -e OPENAI_API_KEY=your-key videonote
+# Create .env first (see above)
+docker compose up -d
 ```
 
-## 📄 许可证
+Access the app at http://localhost:3000 (frontend via nginx) or http://localhost:8000 (API).
 
-MIT License
+## Configuration
+
+All secrets live in `.env` (git-ignored). `config.yaml` uses `${ENV_VAR}` placeholders:
+
+| Variable | Description | Default |
+|---|---|---|
+| `LLM_API_KEY` | API key for text LLM | - |
+| `LLM_BASE_URL` | LLM endpoint | `https://api.openai.com/v1` |
+| `LLM_MODEL` | LLM model name | `gpt-4o-mini` |
+| `VLM_API_KEY` | API key for vision model | Falls back to LLM key |
+| `VLM_BASE_URL` | VLM endpoint | Falls back to LLM URL |
+| `VLM_MODEL` | VLM model name | Falls back to LLM model |
+| `ASR_ENABLED` | Enable Whisper transcription | `false` |
+| `ASR_MODEL` | Whisper model name | `whisper-1` |
+| `MAX_CONCURRENT_TASKS` | Max parallel video processing | `2` |
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/upload` | Upload video (streaming, dedup) |
+| `GET` | `/api/task/{id}/status` | Task status with error_kind |
+| `POST` | `/api/task/{id}/retry` | Retry failed task |
+| `DELETE` | `/api/task/{id}` | Delete task |
+| `GET` | `/api/history` | All tasks (showing original filenames) |
+| `GET` | `/api/note/{id}/content` | Get note content as JSON |
+| `GET` | `/api/note/{id}` | Download note as .md file |
+| `POST` | `/api/notes/download-zip` | Batch download notes as ZIP |
+| `GET` | `/api/health` | Health check with ASR/model info |
+
+## Architecture
+
+```
+src/
+  core/
+    engine.py       # Main pipeline with semaphore + task handles
+    checkpoint.py   # SQLite + WAL + threading.Lock
+    dedup.py        # Streaming SHA-256 hash
+  services/
+    ai_service.py   # LLM + VLM + optional ASR (OpenAI-compatible)
+    audio_service.py # FFmpeg audio extraction
+    video_service.py # FFmpeg keyframe extraction
+  api/
+    upload.py       # Streaming upload, dedup + instant return
+    task.py         # Task status with error classification
+    note.py         # Note retrieval + batch ZIP
+  config/
+    settings.py     # YAML + env var + .env loader
+  models/
+    task.py         # Task/Status/Stage enums + dataclass
+```
+
+## Development
+
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio httpx
+
+# Run tests
+pytest tests/ -v
+```
+
+## Error Classification
+
+When processing fails, the error is classified into categories shown to the user:
+
+- **network**: Connection timeout, DNS failure, SSL error
+- **api**: API key invalid, rate limited, server error
+- **ffmpeg**: Video/audio processing failure
+- **format**: Unsupported file format
+- **interrupted**: Service was restarted during processing

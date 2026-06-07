@@ -1,1 +1,1 @@
-﻿# VideoNote Package
+# VideoNote Package
