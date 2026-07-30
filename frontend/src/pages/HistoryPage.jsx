@@ -1,384 +1,224 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Trash2, RefreshCw, Loader2, Clock, CheckCircle2, XCircle, History, ArrowUpRight, ArrowLeft, Search, Download, CheckSquare, Square, FileText, Star, Copy, MoreVertical, ListFilter } from 'lucide-react'
-import { getHistory, getHistoryAll, deleteTask, retryTask, downloadNoteMd, downloadNotePdf, downloadNotesZip } from '../api/client'
-import { useLang } from '../context/LangContext'
+import { useState, useEffect, useRef } from "react"
+import { useNavigate } from "react-router-dom"
+import {
+  Trash2, RefreshCw, Loader2, Clock, CheckCircle2, XCircle,
+  Search, Download, CheckSquare, Square, Star, StarOff,
+  MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play,
+} from "lucide-react"
+import { downloadNoteMd, downloadNotePdf, downloadNotesZip } from "../api/client"
+import { useTaskStore } from "../stores/taskStore"
+import { useLang } from "../context/LangContext"
+
+import { Button } from "../components/ui/button"
+import { Card, CardContent } from "../components/ui/card"
+import { Badge } from "../components/ui/badge"
+import { Input } from "../components/ui/input"
+import { Skeleton } from "../components/ui/skeleton"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu"
+import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "../components/ui/tooltip"
+import { cn } from "../lib/utils"
+
+const statusConfig = {
+  completed: { icon: CheckCircle2, variant: "success", color: "text-emerald-500", bg: "bg-emerald-500/10", label: { zh: "\u5df2\u5b8c\u6210", en: "Done" } },
+  failed: { icon: XCircle, variant: "destructive", color: "text-destructive", bg: "bg-destructive/10", label: { zh: "\u5931\u8d25", en: "Failed" } },
+  processing: { icon: Loader2, variant: "default", color: "text-primary", bg: "bg-primary/10", label: { zh: "\u5904\u7406\u4e2d", en: "Running" } },
+  pending: { icon: Clock, variant: "secondary", color: "text-muted-foreground", bg: "bg-muted", label: { zh: "\u7b49\u5f85\u4e2d", en: "Pending" } },
+  paused: { icon: Pause, variant: "secondary", color: "text-amber-500", bg: "bg-amber-500/10", label: { zh: "\u5df2\u6682\u505c", en: "Paused" } },
+}
 
 function HistoryPage() {
-  const [history, setHistory] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const debounceTimer = useRef(null)
-  const [selected, setSelected] = useState(new Set())
+  const {
+    tasks, loading, page, totalPages, total, statusFilter, search, selected,
+    setFilter, toggleSelect, selectAll, clearSelection, fetchTasks,
+    retryTask, deleteTask, deleteSelected, pauseTask, resumeTask, filteredTasks,
+  } = useTaskStore()
+  const [downloadFormat, setDownloadFormat] = useState("md")
   const [downloading, setDownloading] = useState(false)
-  const [downloadFormat, setDownloadFormat] = useState('md')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [favorites, setFavorites] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('vn_favorites') || '[]')) } catch { return new Set() } })
-  const [contextMenu, setContextMenu] = useState(null)
-  const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [total, setTotal] = useState(0)
   const navigate = useNavigate()
   const { t, lang } = useLang()
+  const debounceRef = useRef(null)
 
-  useEffect(() => { loadHistory() }, [])
+  useEffect(() => { fetchTasks(1) }, [])
 
-  // Debounce search input
-  useEffect(() => {
-    if (debounceTimer.current) clearTimeout(debounceTimer.current)
-    debounceTimer.current = setTimeout(() => setDebouncedSearch(search), 300)
-    return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current) }
-  }, [search])
-
-  const loadHistory = async (p = 1) => {
-    try {
-      setLoading(true)
-      const resp = await getHistory(p, 20)
-      setHistory(resp.items || [])
-      setTotalPages(resp.pages || 1)
-      setTotal(resp.total || 0)
-      setPage(p)
-    }
-    catch (err) { console.error(err) }
-    finally { setLoading(false) }
+  const handleSearch = (val) => {
+    setFilter("search", val)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => fetchTasks(1), 300)
   }
 
   const handleDelete = async (e, taskId) => {
     e.stopPropagation()
     if (!confirm(t.confirmDelete)) return
-    try { await deleteTask(taskId); setHistory(history.filter(i => i.task_id !== taskId)); setSelected(s => { const n = new Set(s); n.delete(taskId); return n }) }
-    catch (err) { alert(t.deleteFailed) }
+    try { await deleteTask(taskId) } catch { alert(t.deleteFailed) }
   }
 
   const handleRetry = async (e, taskId) => {
     e.stopPropagation()
-    try { await retryTask(taskId); loadHistory() }
-    catch (err) { alert(t.retryFailed) }
+    try { await retryTask(taskId) } catch { alert(t.retryFailed) }
   }
 
-  const toggleFavorite = (e, taskId) => {
+  const handlePauseResume = async (e, task) => {
     e.stopPropagation()
-    setFavorites(prev => {
-      const n = new Set(prev)
-      n.has(taskId) ? n.delete(taskId) : n.add(taskId)
-      localStorage.setItem('vn_favorites', JSON.stringify([...n]))
-      return n
-    })
-  }
-
-  const handleContextMenu = (e, item) => {
-    e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY, item })
-  }
-
-  const closeContextMenu = () => setContextMenu(null)
-
-  useEffect(() => {
-    if (contextMenu) {
-      const handler = () => closeContextMenu()
-      document.addEventListener('click', handler)
-      return () => document.removeEventListener('click', handler)
-    }
-  }, [contextMenu])
-
-  const toggleSelect = (taskId) => {
-    setSelected(s => { const n = new Set(s); n.has(taskId) ? n.delete(taskId) : n.add(taskId); return n })
-  }
-
-  const toggleSelectAll = () => {
-    const completedIds = filtered.filter(i => i.status === 'completed').map(i => i.task_id)
-    if (completedIds.every(id => selected.has(id))) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(completedIds))
-    }
+    try {
+      if (task.status === "paused") await resumeTask(task.task_id)
+      else await pauseTask(task.task_id)
+    } catch { /* ignore */ }
   }
 
   const doDownload = (taskId, name) => {
-    const base = (name || 'note').replace(/\.[^.]+$/, '')
-    if (downloadFormat === 'pdf') {
-      downloadNotePdf(taskId, base + '.pdf')
-    } else {
-      downloadNoteMd(taskId, base + '.md')
-    }
+    const base = (name || "note").replace(/\.[^.]+$/, "")
+    if (downloadFormat === "pdf") downloadNotePdf(taskId, base + ".pdf")
+    else downloadNoteMd(taskId, base + ".md")
   }
 
-  const handleBatchDownloadZip = async () => {
+  const handleBatchZip = async () => {
     if (!selected.size) return
-    if (!confirm(t.confirmDownload || 'Download as ZIP?')) return
     setDownloading(true)
     try { await downloadNotesZip([...selected], downloadFormat) }
-    catch (err) { alert('Download failed') }
+    catch { alert("Download failed") }
     finally { setDownloading(false) }
   }
 
-  const handleBatchDownload = async () => {
-    if (!selected.size) return
-    if (!confirm(t.confirmDownload || `Download ${selected.size} notes as ZIP?`)) return
-    setDownloading(true)
-    try { await downloadNotesZip([...selected]) }
-    catch (err) { alert('下载失败') }
-    finally { setDownloading(false) }
+  const formatDate = (d) => {
+    if (!d) return ""
+    const dt = new Date(d)
+    if (isNaN(dt)) return "-"
+    return dt.toLocaleString(lang === "zh" ? "zh-CN" : "en-US", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
   }
 
-  const handleBatchDownloadMd = async () => {
-    if (!selected.size) return
-    if (!confirm(t.confirmDownloadMd || `Download ${selected.size} notes as MD files?`)) return
-    setDownloading(true)
-    try {
-      const ids = [...selected]
-      for (const id of ids) {
-        const item = history.find(h => h.task_id === id)
-        if (item) {
-          const name = (item.videoName || 'note').replace(/\.[^.]+$/, '') + '.md'
-          await downloadNoteMd(id, name)
-          await new Promise(r => setTimeout(r, 300))
-        }
-      }
-    } catch (err) { alert('下载失败') }
-    finally { setDownloading(false) }
-  }
+  const filtered = filteredTasks()
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return ''
-    const mins = Math.floor((Date.now() - new Date(dateStr)) / 60000)
-    if (mins < 1) return t.justNow
-    if (mins < 60) return `${mins}${t.minsAgo}`
-    const hours = Math.floor(mins / 60)
-    if (hours < 24) return `${hours}${t.hoursAgo}`
-    return `${Math.floor(hours / 24)}${t.daysAgo}`
-  }
-
-  const formatTokens = (n) => {
-    if (!n || n === 0) return null
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-    return String(n)
-  }
-
-  const statusMap = {
-    completed: { icon: CheckCircle2, color: 'var(--green)', bg: 'var(--green-light)', label: t.completed, badge: 'badge-ok' },
-    failed: { icon: XCircle, color: 'var(--red)', bg: 'var(--red-light)', label: t.failed, badge: 'badge-err' },
-    processing: { icon: Loader2, color: 'var(--blue)', bg: 'var(--blue-light)', label: t.processing, badge: 'badge-proc' },
-    pending: { icon: Clock, color: 'var(--gray-400)', bg: 'var(--gray-100)', label: t.pending, badge: 'badge-pending' },
-  }
-
-  const filtered = history.filter(h => {
-    if (debouncedSearch && !h.videoName?.toLowerCase().includes(debouncedSearch.toLowerCase())) return false
-    if (statusFilter !== 'all' && h.status !== statusFilter) return false
-    return true
-  })
-  const completedCount = filtered.filter(i => i.status === 'completed').length
-
-  if (loading) return (
-    <div style={{ textAlign: 'center', padding: '120px 0' }}>
-      <Loader2 size={36} className="spin" color="var(--blue)" />
+  if (loading && !tasks.length) return (
+    <div className="flex items-center justify-center py-24">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
     </div>
   )
 
   return (
-    <div>
-      {/* 工具栏 */}
-      <div className="history-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/')} style={{ padding: '4px 8px' }}>
-            <ArrowLeft size={16} />
-          </button>
-          <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px' }}>{t.history}</h1>
-          <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>{t.totalRecords} {total} {t.records}</span>
-        </div>
-        <div className="search-box" style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '7px 12px', borderRadius: 'var(--radius-sm)',
-          background: 'var(--white)', border: '1px solid var(--gray-200)', width: 240,
-        }}>
-          <Search size={14} color="var(--gray-400)" />
-          <input type="text" placeholder="搜索记录..." value={search} onChange={e => setSearch(e.target.value)}
-            style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 13, flex: 1, color: 'var(--gray-900)', fontFamily: 'inherit' }} />
-        </div>
-      </div>
-
-      {/* 状态筛选 */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-        {[['all', lang === 'zh' ? '全部' : 'All'], ['completed', t.completed], ['processing', t.processing], ['failed', t.failed], ['pending', t.pending]].map(([key, label]) => (
-          <button key={key} onClick={() => setStatusFilter(key)} style={{
-            padding: '5px 14px', borderRadius: 100, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, fontFamily: 'inherit',
-            background: statusFilter === key ? 'var(--blue)' : 'var(--gray-100)',
-            color: statusFilter === key ? 'white' : 'var(--gray-500)',
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {/* 批量操作栏 */}
-      {completedCount > 0 && (
-<div className="batch-bar" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, padding: '10px 14px', background: 'var(--white)', borderRadius: 10, border: '1px solid var(--gray-200)', flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost btn-sm" onClick={toggleSelectAll} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-            {completedCount > 0 && completedCount === selected.size ? <CheckSquare size={14} /> : <Square size={14} />}
-            {selected.size > 0 ? `已选 ${selected.size} 项` : '全选'}
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--gray-200)', borderRadius: 8, overflow: 'hidden' }}>
-            <button onClick={() => setDownloadFormat('md')} style={{
-              padding: '5px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: downloadFormat === 'md' ? 'var(--blue)' : 'var(--white)',
-              color: downloadFormat === 'md' ? 'white' : 'var(--gray-500)',
-            }}>{lang === 'zh' ? '下载MD' : 'MD'}</button>
-            <button onClick={() => setDownloadFormat('pdf')} style={{
-              padding: '5px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              background: downloadFormat === 'pdf' ? 'var(--blue)' : 'var(--white)',
-              color: downloadFormat === 'pdf' ? 'white' : 'var(--gray-500)',
-            }}>{lang === 'zh' ? '下载PDF' : 'PDF'}</button>
+    <TooltipProvider>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-bold tracking-tight">{t.history}</h1>
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input placeholder={lang === "zh" ? "\u641c\u7d22..." : "Search..."} value={search} onChange={e => handleSearch(e.target.value)} className="pl-9" />
           </div>
-          <div style={{ flex: 1 }} />
-          <button className="btn btn-outline btn-sm" onClick={handleBatchDownloadZip} disabled={!selected.size || downloading}>
-            {downloading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-            {t.downloadZip} {selected.size > 0 && `(${selected.size})`}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={handleBatchDownload} disabled={!selected.size || downloading}>
-            {downloading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-            {downloadFormat === 'pdf' ? (lang === 'zh' ? '下载PDF' : 'PDF') : (lang === 'zh' ? '下载MD' : 'MD')} {selected.size > 0 && `(${selected.size})`}
-          </button>
         </div>
-      )}
 
-      {filtered.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '56px 24px' }}>
-          <div className="dropzone-icon" style={{ margin: '0 auto 14px' }}>
-            <History size={28} color="var(--blue)" />
+        <div className="flex flex-wrap gap-1.5">
+          {[["all", lang === "zh" ? "\u5168\u90e8" : "All", total],
+            ["completed", t.completed, tasks.filter(h => h.status === "completed").length],
+            ["processing", t.processing, tasks.filter(h => h.status === "processing").length],
+            ["failed", t.failed, tasks.filter(h => h.status === "failed").length],
+            ["pending", t.pending, tasks.filter(h => h.status === "pending").length],
+            ["paused", lang === "zh" ? "\u5df2\u6682\u505c" : "Paused", tasks.filter(h => h.status === "paused").length],
+          ].map(([key, label, count]) => (
+            <Button key={key} variant={statusFilter === key ? "default" : "outline"} size="sm" className="rounded-full gap-1.5"
+              onClick={() => { setFilter("statusFilter", key); fetchTasks(1) }}>
+              {label}<span className="text-xs opacity-70">{count}</span>
+            </Button>
+          ))}
+        </div>
+
+        {selected.size > 0 && (
+          <Card><CardContent className="flex flex-wrap items-center gap-3 p-3">
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              <CheckSquare className="mr-1.5 h-4 w-4" />{lang === "zh" ? "\u53d6\u6d88\u5168\u9009" : "Deselect"}
+            </Button>
+            <span className="text-sm text-muted-foreground">{selected.size} {lang === "zh" ? "\u5df2\u9009" : "selected"}</span>
+            <Button variant="destructive" size="sm" onClick={async () => {
+              if (!confirm(lang === "zh" ? "\u786e\u5b9a\u5220\u9664\u9009\u4e2d\u7684 " + selected.size + " \u6761\u8bb0\u5f55\uff1f" : "Delete " + selected.size + " selected records?")) return
+              try { await deleteSelected() } catch { alert(lang === "zh" ? "\u6279\u91cf\u5220\u9664\u5931\u8d25" : "Batch delete failed") }
+            }}>
+              <Trash2 className="mr-1.5 h-4 w-4" />{lang === "zh" ? "\u5220\u9664 (" + selected.size + ")" : "Delete (" + selected.size + ")"}
+            </Button>
+            <div className="flex overflow-hidden rounded-lg border">
+              <Button variant={downloadFormat === "md" ? "default" : "ghost"} size="sm" className="rounded-none" onClick={() => setDownloadFormat("md")}>MD</Button>
+              <Button variant={downloadFormat === "pdf" ? "default" : "ghost"} size="sm" className="rounded-none" onClick={() => setDownloadFormat("pdf")}>PDF</Button>
+            </div>
+            <div className="flex-1" />
+            <Button variant="outline" size="sm" onClick={handleBatchZip} disabled={downloading}>
+              <Download className="mr-1.5 h-4 w-4" />{t.downloadZip}
+            </Button>
+          </CardContent></Card>
+        )}
+
+          {filtered.length === 0 ? (
+          <Card><CardContent className="flex flex-col items-center justify-center py-16">
+            <p className="text-muted-foreground">{search ? (lang === "zh" ? "\u672a\u627e\u5230\u5339\u914d\u8bb0\u5f55" : "No matches") : t.noRecords}</p>
+          </CardContent></Card>
+        ) : (
+          <Card><div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
+                  <th className="w-8 px-3 py-2"><button onClick={selectAll} className="text-muted-foreground hover:text-foreground">{selected.size > 0 ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></th>
+                  <th className="px-3 py-2">{lang === "zh" ? "\u89c6\u9891" : "Video"}</th>
+                  <th className="px-3 py-2">{lang === "zh" ? "\u72b6\u6001" : "Status"}</th>
+                  <th className="px-3 py-2">{lang === "zh" ? "\u98ce\u683c" : "Style"}</th>
+                  <th className="px-3 py-2 text-right">{lang === "zh" ? "Token" : "Tokens"}</th>
+                  <th className="px-3 py-2">{lang === "zh" ? "\u521b\u5efa\u65f6\u95f4" : "Created"}</th>
+                  <th className="px-3 py-2 text-right">{lang === "zh" ? "\u64cd\u4f5c" : "Actions"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(item => {
+                  const sc = statusConfig[item.status] || statusConfig.pending
+                  const Icon = sc.icon
+                  const canView = item.status === "completed"
+                  return (
+                    <tr key={item.task_id} className={cn("border-b transition-colors hover:bg-muted/30", canView && "cursor-pointer")} onClick={() => canView && navigate(`/note/${item.task_id}`)}>
+                      <td className="px-3 py-2"><button onClick={e => { e.stopPropagation(); toggleSelect(item.task_id) }} className="text-muted-foreground hover:text-foreground">{selected.has(item.task_id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", sc.bg)}>
+                            <Icon className={cn("h-4 w-4", sc.color, item.status === "processing" && "animate-spin")} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{item.videoName}</p>
+                            {item.video_url && <p className="truncate text-xs text-muted-foreground"><ExternalLink className="mr-1 inline h-3 w-3" />{item.video_url}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2"><Badge variant={sc.variant}>{sc.label[lang]}</Badge></td>
+                      <td className="px-3 py-2 text-muted-foreground">{item.note_style || "-"}</td>
+                      <td className="px-3 py-2 text-right font-mono text-xs">{item.totalTokens || "-"}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{formatDate(item.createdAt)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {canView && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}><Eye className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{lang === "zh" ? "\u67e5\u770b\u7b14\u8bb0" : "View"}</TooltipContent></Tooltip>}
+                          {item.status === "failed" && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handleRetry(e, item.task_id)}><RotateCcw className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t.retry}</TooltipContent></Tooltip>}
+                          {(item.status === "processing" || item.status === "paused") && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handlePauseResume(e, item)}>{item.status === "paused" ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}</Button></TooltipTrigger><TooltipContent>{item.status === "paused" ? (lang === "zh" ? "\u7ee7\u7eed" : "Resume") : (lang === "zh" ? "\u6682\u505c" : "Pause")}</TooltipContent></Tooltip>}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {canView && (<><DropdownMenuItem onClick={() => downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md")}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem><DropdownMenuItem onClick={() => downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf")}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem></>)}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => handleDelete(e, item.task_id)}><Trash2 className="mr-2 h-4 w-4" />{t.delete}</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div></Card>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => fetchTasks(page - 1)}>{"<"}</Button>
+            <span className="px-3 text-sm text-muted-foreground">{page} / {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => fetchTasks(page + 1)}>{">"}</Button>
           </div>
-          <p style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{search ? '未找到匹配记录' : t.noRecords}</p>
-          {!search && <p style={{ color: 'var(--gray-400)', fontSize: 13, marginBottom: 20 }}>{t.uploadFirst}</p>}
-          <button className="btn btn-primary" onClick={() => navigate('/')}>{t.upload}</button>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10 }}>
-          {filtered.map((item) => {
-            const s = statusMap[item.status] || statusMap.pending
-            const Icon = s.icon
-            const canView = item.status === 'completed'
-            const isSelected = selected.has(item.task_id)
-            return (
-              <div key={item.task_id} className="hist-row in"
-                onClick={() => canView && navigate(`/note/${item.task_id}`)}
-                style={{ padding: '12px 14px', background: isSelected ? 'var(--blue-light)' : undefined }}>
-                <div className="checkbox-col" style={{ display: 'flex', alignItems: 'center' }}>
-                  {canView && (
-                    <button onClick={(e) => { e.stopPropagation(); toggleSelect(item.task_id) }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex' }}>
-                      {isSelected ? <CheckSquare size={16} color="var(--blue)" /> : <Square size={16} color="var(--gray-300)" />}
-                    </button>
-                  )}
-                </div>
-                <div className="hist-icon" style={{ background: s.bg, width: 36, height: 36, borderRadius: 8 }}>
-                  <Icon size={16} color={s.color} className={item.status === 'processing' ? 'spin' : ''} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.videoName}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 1 }}>
-                    <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{formatDate(item.createdAt)}</span>
-                    {formatTokens(item.totalTokens) && (
-                      <span style={{ fontSize: 10, color: 'var(--gray-400)', background: 'var(--gray-100)', padding: '1px 5px', borderRadius: 4 }}>
-                        {formatTokens(item.totalTokens)} tokens
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span className={`badge ${s.badge}`}>{s.label}</span>
-                <div style={{ display: 'flex', gap: 2, alignItems: 'center', marginLeft: 4 }}>
-                  {canView && (
-                    <button className="btn btn-primary btn-sm" style={{ padding: '4px 10px', fontSize: 12 }}
-                      onClick={(e) => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}>
-                      <ArrowUpRight size={12} /> {t.view}
-                    </button>
-                  )}
-                  {canView && (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', fontSize: 12 }}
-                      onClick={(e) => { e.stopPropagation(); doDownload(item.task_id, item.videoName) }}
-                      title={downloadFormat === 'pdf' ? (lang === 'zh' ? '下载PDF' : 'PDF') : (lang === 'zh' ? '下载MD' : 'MD')}>
-                      <Download size={12} />
-                    </button>
-                  )}
-                  {item.status === 'failed' && (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: 4 }} onClick={(e) => handleRetry(e, item.task_id)}>
-                      <RefreshCw size={13} />
-                    </button>
-                  )}
-                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--gray-400)', padding: 4 }}
-                    onClick={(e) => handleDelete(e, item.task_id)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-outline btn-sm" disabled={page <= 1} onClick={() => loadHistory(page - 1)}>
-            {'<'}
-          </button>
-          <span style={{ fontSize: 13, color: 'var(--gray-500)', padding: '6px 12px' }}>
-            {page} / {totalPages}
-          </span>
-          <button className="btn btn-outline btn-sm" disabled={page >= totalPages} onClick={() => loadHistory(page + 1)}>
-            {'>'}
-          </button>
-        </div>
-      )}
-      {/* Context Menu */}
-      {contextMenu && (
-        <div style={{
-          position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 9999,
-          background: 'white', borderRadius: 10, border: '1px solid var(--gray-200)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', padding: 4, minWidth: 160,
-        }}>
-          {contextMenu.item.status === 'completed' && (
-            <button onClick={() => { navigate(`/note/${contextMenu.item.task_id}`); closeContextMenu() }}
-              style={ctxBtnStyle}>
-              <ArrowUpRight size={14} /> {lang === 'zh' ? '查看笔记' : 'View Note'}
-            </button>
-          )}
-          {contextMenu.item.status === 'completed' && (
-            <button onClick={() => { doDownload(contextMenu.item.task_id, contextMenu.item.videoName); closeContextMenu() }}
-              style={ctxBtnStyle}>
-              <Download size={14} /> {downloadFormat === 'pdf' ? (lang === 'zh' ? '下载PDF' : 'PDF') : (lang === 'zh' ? '下载MD' : 'MD')}
-            </button>
-          )}
-          <button onClick={() => { toggleFavorite({stopPropagation:()=>{}}, contextMenu.item.task_id); closeContextMenu() }}
-            style={ctxBtnStyle}>
-            <Star size={14} /> {favorites.has(contextMenu.item.task_id) ? (lang === 'zh' ? '取消收藏' : 'Unstar') : (lang === 'zh' ? '收藏' : 'Star')}
-          </button>
-          {contextMenu.item.status === 'completed' && (
-            <button onClick={() => { navigator.clipboard.writeText(contextMenu.item.task_id); closeContextMenu() }}
-              style={ctxBtnStyle}>
-              <Copy size={14} /> {lang === 'zh' ? '复制ID' : 'Copy ID'}
-            </button>
-          )}
-          {contextMenu.item.status === 'failed' && (
-            <button onClick={() => { handleRetry({stopPropagation:()=>{}}, contextMenu.item.task_id); closeContextMenu() }}
-              style={ctxBtnStyle}>
-              <RefreshCw size={14} /> {t.retry}
-            </button>
-          )}
-          <div style={{ height: 1, background: 'var(--gray-100)', margin: '4px 0' }} />
-          <button onClick={() => { handleDelete({stopPropagation:()=>{}}, contextMenu.item.task_id); closeContextMenu() }}
-            style={{...ctxBtnStyle, color: 'var(--red)'}}>
-            <Trash2 size={14} /> {t.delete}
-          </button>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </TooltipProvider>
   )
-}
-
-const ctxBtnStyle = {
-  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px',
-  border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit',
-  color: 'var(--gray-700)', borderRadius: 6,
 }
 
 export default HistoryPage

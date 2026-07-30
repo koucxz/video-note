@@ -1,4 +1,4 @@
-﻿"""VideoNote engine with ASR-optional pipeline, concurrency semaphore, task handle registry."""
+"""VideoNote engine with ASR-optional pipeline, concurrency semaphore, task handle registry."""
 import asyncio
 import logging
 import aiofiles
@@ -12,6 +12,10 @@ from ..core.dedup import FileDeduplicator
 from ..services.ai_service import AIProvider, OpenAIProvider, AnthropicProvider, classify_error
 from ..services.audio_service import AudioService
 from ..services.video_service import VideoService
+try:
+    from ..services.vector_service import get_vector_service
+except ImportError:
+    get_vector_service = None
 from ..config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -47,6 +51,14 @@ class VideoNoteEngine:
         self.video_service = VideoService()
         self.audio_service = AudioService()
         Path(config.storage.output_dir).mkdir(parents=True, exist_ok=True)
+        if get_vector_service is not None:
+            try:
+                self.vector = get_vector_service()
+            except Exception as e:
+                logger.warning("Vector service unavailable: %s", e)
+                self.vector = None
+        else:
+            self.vector = None
 
         # Concurrency control
         max_conc = max(1, config.processing.max_concurrent_tasks)
@@ -139,6 +151,7 @@ class VideoNoteEngine:
         # Build stage list, skipping TRANSCRIBING if ASR is disabled
         all_stages = [
             ProcessingStage.EXTRACTING_AUDIO,
+            ProcessingStage.EXTRACTING_SUBTITLES,
             ProcessingStage.TRANSCRIBING,
             ProcessingStage.GENERATING_OUTLINE,
             ProcessingStage.EXTRACTING_KEYFRAMES,
@@ -147,6 +160,7 @@ class VideoNoteEngine:
         ]
         stage_handlers = {
             ProcessingStage.EXTRACTING_AUDIO: self._extract_audio,
+            ProcessingStage.EXTRACTING_SUBTITLES: self._extract_subtitles,
             ProcessingStage.TRANSCRIBING: self._transcribe,
             ProcessingStage.GENERATING_OUTLINE: self._generate_outline,
             ProcessingStage.EXTRACTING_KEYFRAMES: self._extract_keyframes,
@@ -154,8 +168,16 @@ class VideoNoteEngine:
             ProcessingStage.GENERATING_NOTE: self._generate_note,
         }
 
+        # Skip ASR if disabled or if subtitle_only mode with successful extraction
+        subtitle_only = task_overrides.get("subtitle_only", False)
         if not self.ai.asr_enabled:
             all_stages = [s for s in all_stages if s != ProcessingStage.TRANSCRIBING]
+        elif subtitle_only:
+            # In subtitle_only mode, skip ASR if subtitles were found
+            subtitles = data.get("subtitles", {})
+            if subtitles.get("found"):
+                all_stages = [s for s in all_stages if s != ProcessingStage.TRANSCRIBING]
+                logger.info("Subtitle-only mode: using subtitles, skipping ASR")
 
         stage_list = all_stages
         start_idx = stage_list.index(stage) if stage in stage_list else 0
@@ -175,8 +197,10 @@ class VideoNoteEngine:
                 self.checkpoint.update_task(task_id, progress=progress, updated_at=datetime.now())
                 await self._broadcast(task_id, {"stage": current_stage.value, "progress": progress, "status": "processing"})
             except Exception as exc:
+                import traceback
                 error_kind = classify_error(exc)
-                logger.error("Stage %s failed (%s): %s", current_stage.value, error_kind, exc)
+                tb = traceback.format_exc()
+                logger.error("Stage %s failed (%s): %s\n%s", current_stage.value, error_kind, exc, tb)
                 self.checkpoint.save_progress(task_id, current_stage, i / len(stage_list), data)
                 await self._broadcast(task_id, {"status": "failed", "error": str(exc), "error_kind": error_kind})
                 self.checkpoint.update_task(task_id, status=TaskStatus.FAILED.value,
@@ -194,6 +218,11 @@ class VideoNoteEngine:
 
     async def _extract_audio(self, video_path: str, data: dict) -> dict:
         data["audio_path"] = await self.audio_service.extract(video_path)
+        return data
+
+    async def _extract_subtitles(self, video_path: str, data: dict) -> dict:
+        result = await self.video_service.extract_subtitles(video_path)
+        data["subtitles"] = result
         return data
 
     async def _transcribe(self, video_path: str, data: dict) -> dict:
@@ -228,13 +257,33 @@ class VideoNoteEngine:
         task_id = data.get("task_id", "")
         transcript_text = data.get("transcript", {}).get("text", "")
         frame_analysis = data.get("frame_analysis", "")
-        context = f"转录内容:\n{transcript_text[:3000]}\n\n视频帧分析:\n{frame_analysis}" if transcript_text else f"视频文件名: {Path(video_path).name}\n\n视频帧分析:\n{frame_analysis}"
-        note = await self.ai.generate_note(data["outline"], context, language, note_style)
-        video_name = Path(video_path).stem
-        note_path = Path(self.config.storage.output_dir) / f"{task_id[:8]}_{video_name}.md"
-        async with aiofiles.open(note_path, "w", encoding="utf-8") as f:
-            await f.write(note)
-        data["note_path"] = str(note_path)
+        subtitle_text = data.get("subtitles", {}).get("text", "")
+        # Build context from available sources
+        context_parts = []
+        if transcript_text:
+            context_parts.append(f"????:\n{transcript_text[:3000]}")
+        if subtitle_text and subtitle_text != transcript_text:
+            context_parts.append(f"????:\n{subtitle_text[:2000]}")
+        if frame_analysis:
+            context_parts.append(f"?????:\n{frame_analysis}")
+        if not context_parts:
+            context_parts.append(f"?????: {Path(video_path).name}")
+        context = "\n\n".join(context_parts)
+        # generate_note returns (content, tokens) tuple
+        note_content, tokens = await self.ai.generate_note(
+            data["outline"], context, language, note_style)
+        # Save as a note version (also writes the file)
+        version = self.checkpoint.add_note_version(
+            task_id, note_content, source="generated",
+            style=note_style, model_name=self.ai.model)
+        # Accumulate token count
+        old_tokens = 0
+        task_row = self.checkpoint.get_task(task_id)
+        if task_row:
+            old_tokens = int(task_row.get("total_tokens", 0) or 0)
+        self.checkpoint.update_task(task_id, total_tokens=old_tokens + (tokens or 0))
+        data["note_path"] = (task_row or {}).get("note_path", "")
+        data["version_id"] = version.get("id", "")
         return data
 
     def _cleanup_temp_files(self, video_path: str) -> None:

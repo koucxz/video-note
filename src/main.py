@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from .api import upload_router, task_router, note_router, storage_router, model_config_router
+from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router
 from .api.ws_manager import ws_manager
 from .core.engine import get_engine
 
@@ -71,6 +71,7 @@ app.include_router(task_router)
 app.include_router(note_router)
 app.include_router(storage_router)
 app.include_router(model_config_router)
+app.include_router(settings_router)
 
 output_dir = Path("./data/output")
 output_dir.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-﻿"""Upload API - streaming upload, dedup with instant return for known files."""
+"""Upload API - streaming upload, dedup with instant return for known files."""
 import asyncio
 import json
 import logging

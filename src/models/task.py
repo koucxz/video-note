@@ -1,4 +1,4 @@
-﻿"""Task data models"""
+"""Task data models"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -18,6 +18,7 @@ class TaskStatus(str, Enum):
 class ProcessingStage(str, Enum):
     QUEUED = "queued"
     EXTRACTING_AUDIO = "extracting_audio"
+    EXTRACTING_SUBTITLES = "extracting_subtitles"
     TRANSCRIBING = "transcribing"
     GENERATING_OUTLINE = "generating_outline"
     EXTRACTING_KEYFRAMES = "extracting_keyframes"

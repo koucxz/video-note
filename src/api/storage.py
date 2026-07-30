@@ -1,4 +1,4 @@
-﻿"""Storage management API - list and clean uploaded videos."""
+"""Storage management API - list and clean uploaded videos."""
 import os
 from pathlib import Path
 from typing import Optional
