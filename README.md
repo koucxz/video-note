@@ -10,7 +10,7 @@ Convert videos into structured notes using cloud AI (no local models needed).
 - **File Deduplication**: Same video uploaded twice won't create duplicate files or tasks.
 - **Checkpoint Resume**: If processing is interrupted (service restart, network issue), click "Retry" to resume from the last completed stage.
 - **Concurrency Control**: Configurable limit on simultaneous video processing tasks.
-- **5 Note Styles**: Standard, Summary, Action Checklist, Academic, Creative.
+- **6 Note Styles**: Standard, Detailed, Summary, Action Checklist, Academic, Creative.
 - **Bilingual**: Chinese and English UI and output.
 - **Docker Ready**: One-command deployment with docker-compose.
 

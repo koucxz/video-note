@@ -7,10 +7,11 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from ..core.engine import get_engine, _clamp_param
 from ..utils.video_utils import get_video_duration
 
+from ..services.ai_service import DEFAULT_NOTE_STYLE, VALID_NOTE_STYLES
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-VALID_STYLES = {"standard", "summary", "action", "academic", "creative"}
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 MAX_DURATION_SECONDS = 6 * 3600  # 6 hours
 
@@ -21,7 +22,7 @@ MAX_DURATION_SECONDS = 6 * 3600  # 6 hours
 async def upload_video(
     file: UploadFile = File(...),
     language: str = Form(default="zh"),
-    note_style: str = Form(default="standard"),
+    note_style: str = Form(default=DEFAULT_NOTE_STYLE),
     processing_options: str = Form(default="{}"),
 ):
     if not file.filename:
@@ -34,8 +35,8 @@ async def upload_video(
 
     if language not in ("zh", "en"):
         language = "zh"
-    if note_style not in VALID_STYLES:
-        note_style = "standard"
+    if note_style not in VALID_NOTE_STYLES:
+        note_style = DEFAULT_NOTE_STYLE
 
     # Parse and validate processing options
     try:

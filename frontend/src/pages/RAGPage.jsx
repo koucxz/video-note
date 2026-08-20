@@ -4,13 +4,13 @@ import ReactMarkdown from "react-markdown"
 import { ragAsk, getHistoryAll, getCollections } from "../api/client"
 import { useLang } from "../context/LangContext"
 import { Button } from "../components/ui/button"
-import { Card, CardContent } from "../components/ui/card"
+import { Card } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { cn } from "../lib/utils"
 
 export default function RAGPage() {
-  const { lang } = useLang()
+  const { t } = useLang()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -48,9 +48,9 @@ export default function RAGPage() {
       const scope = selectedNotes.size > 0 ? { task_ids: [...selectedNotes] } : {}
       const history = messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
       const resp = await ragAsk(q, history, scope)
-      setMessages(prev => [...prev, { role: "assistant", content: resp.answer || "Failed to generate answer", sources: resp.sources || [], tokens: resp.tokens || 0 }])
+      setMessages(prev => [...prev, { role: "assistant", content: resp.answer || t('rag.generateFailed'), sources: resp.sources || [], tokens: resp.tokens || 0 }])
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", content: "Request failed, please try again", error: true }])
+      setMessages(prev => [...prev, { role: "assistant", content: t('rag.requestFailed'), error: true }])
     } finally { setLoading(false) }
   }
 
@@ -58,29 +58,33 @@ export default function RAGPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const t = {
-    scope: lang === "zh" ? "知识范围" : "Knowledge Scope",
-    all: lang === "zh" ? "全部" : "All",
-    searching: lang === "zh" ? "搜索所有笔记" : "Searching all notes",
-    selectedCount: (n) => lang === "zh" ? `已选 ${n} 篇` : `${n} selected`,
-    title: lang === "zh" ? "笔记问答" : "Note Q&A",
-    desc: lang === "zh" ? "基于你所有的视频笔记进行智能问答" : "Ask questions across all your video notes.",
-    thinking: lang === "zh" ? "思考中..." : "Thinking...",
-    placeholder: lang === "zh" ? "输入你的问题..." : "Ask a question...",
-  }
-
   return (
     <div className="flex h-[calc(100vh-3.5rem)]">
       <div className="hidden w-72 shrink-0 border-r bg-background md:block">
         <div className="sticky top-14 flex h-[calc(100vh-3.5rem)] flex-col p-3">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">{t.scope}</h3>
-            <div className="flex gap-1"><Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedNotes(new Set(notes.map(n => n.task_id)))}>{lang === "zh" ? "全选" : "All"}</Button><Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedNotes(new Set())}>{lang === "zh" ? "清除" : "Clear"}</Button></div>
+            <h3 className="text-sm font-semibold">{t('rag.knowledgeScope')}</h3>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedNotes(new Set(notes.map(n => n.task_id)))}>{t('rag.selectAll')}</Button>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedNotes(new Set())}>{t('rag.clear')}</Button>
+            </div>
           </div>
           <p className="mb-2 text-xs text-muted-foreground">
-            {selectedNotes.size === 0 ? t.searching : t.selectedCount(selectedNotes.size)}
+            {selectedNotes.size === 0 ? t('rag.searchingAll') : t('rag.selectedCount', { count: selectedNotes.size })}
           </p>
-          {collections.length > 0 && (<div className="mb-3 space-y-1"><p className="text-xs font-medium text-muted-foreground">{lang === "zh" ? "按合集选择" : "By Collection"}</p><div className="flex flex-wrap gap-1">{collections.map(col => (<Button key={col.id} variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => { const ids = (col.noteIds || []).filter(id => notes.some(n => n.task_id === id)); setSelectedNotes(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; }); }}>{col.name}</Button>))}</div></div>)}
+          {collections.length > 0 && (
+            <div className="mb-3 space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">{t('rag.byCollection')}</p>
+              <div className="flex flex-wrap gap-1">
+                {collections.map(col => (
+                  <Button key={col.id} variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => {
+                    const ids = (col.noteIds || []).filter(id => notes.some(n => n.task_id === id))
+                    setSelectedNotes(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next })
+                  }}>{col.name}</Button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex-1 space-y-0.5 overflow-y-auto">
             {notes.map(item => (
               <label key={item.task_id} className={cn("flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors", selectedNotes.has(item.task_id) ? "bg-primary/10" : "hover:bg-muted")}>
@@ -99,12 +103,12 @@ export default function RAGPage() {
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
                 <BookOpen className="h-8 w-8 text-primary" />
               </div>
-              <h2 className="mb-2 text-lg font-semibold">{t.title}</h2>
+              <h2 className="mb-2 text-lg font-semibold">{t('rag.title')}</h2>
               <p className="max-w-md text-sm text-muted-foreground">
-                  {selectedNotes.size > 0
-                    ? (lang === "zh" ? `基于已选的 ${selectedNotes.size} 篇笔记进行问答` : `Ask across ${selectedNotes.size} selected notes`)
-                    : (lang === "zh" ? "基于所有视频笔记进行智能问答" : "Ask questions across all your video notes")}
-                </p>
+                {selectedNotes.size > 0
+                  ? t('rag.basedOnSelected', { count: selectedNotes.size })
+                  : t('rag.basedOnAll')}
+              </p>
             </div>
           ) : (
             <div className="mx-auto max-w-3xl space-y-4">
@@ -147,7 +151,7 @@ export default function RAGPage() {
                   </div>
                   <div className="flex items-center gap-2 rounded-xl bg-muted px-4 py-3">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm text-muted-foreground">{t.thinking}</span>
+                    <span className="text-sm text-muted-foreground">{t('rag.thinking')}</span>
                   </div>
                 </div>
               )}
@@ -158,7 +162,7 @@ export default function RAGPage() {
         <div className="border-t p-4">
           <div className="mx-auto max-w-3xl">
             <div className="flex gap-2">
-              <Input value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={t.placeholder} disabled={loading} className="flex-1" />
+              <Input value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={t('rag.placeholder')} disabled={loading} className="flex-1" />
               <Button onClick={handleSend} disabled={loading || !input.trim()}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>

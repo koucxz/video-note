@@ -70,6 +70,7 @@ export const getHistoryAll = async () => {
 };
 
 // ── Note Content ──
+export const getNoteStyles = async () => { return (await api.get('/note-styles')).data.styles; };
 export const getNoteContent = async (taskId) => { return (await api.get('/note/' + taskId + '/content')).data; };
 
 // ── Note Versions ──
@@ -84,33 +85,24 @@ export const polishNote = async (taskId, style, extraInstructions) => {
   return (await api.post('/note/' + taskId + '/polish', { style, extra_instructions: extraInstructions })).data;
 };
 
+const downloadBlob = async (path, filename, mimeType) => {
+  const response = await api.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(new Blob([response.data], { type: mimeType }));
+  const a = document.createElement('a'); a.href = url;
+  a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
 // ── Download ──
-export const downloadNoteMd = async (taskId, filename) => {
-  const response = await api.get('/note/' + taskId, { responseType: 'blob' });
-  const url = URL.createObjectURL(new Blob([response.data]));
-  const a = document.createElement('a'); a.href = url;
-  a.download = filename || 'note.md';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+export const downloadNoteMd = async (taskId, filename) =>
+  downloadBlob('/note/' + taskId, filename || 'note.md', 'text/markdown');
 
-export const downloadNotePdf = async (taskId, filename) => {
-  const response = await api.get('/note/' + taskId + '/pdf', { responseType: 'blob' });
-  const url = URL.createObjectURL(new Blob([response.data]));
-  const a = document.createElement('a'); a.href = url;
-  a.download = filename || 'note.pdf';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+export const downloadNotePdf = async (taskId, filename) =>
+  downloadBlob('/note/' + taskId + '/pdf', filename || 'note.pdf', 'application/pdf');
 
-export const downloadNoteWord = async (taskId, filename) => {
-  const response = await api.get('/note/' + taskId + '/word', { responseType: 'blob' });
-  const url = URL.createObjectURL(new Blob([response.data]));
-  const a = document.createElement('a'); a.href = url;
-  a.download = filename || 'note.docx';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+export const downloadNoteWord = async (taskId, filename) =>
+  downloadBlob('/note/' + taskId + '/word', filename || 'note.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 
 export const downloadNotesZip = async (taskIds, format) => {
   const response = await api.post('/notes/download-zip?format=' + (format || 'md'), taskIds, { responseType: 'blob' });
@@ -157,13 +149,7 @@ export const deleteProvider = async (id) => { return (await api.delete('/provide
 export const activateProvider = async (id) => { return (await api.post('/providers/' + id + '/activate')).data; };
 
 
-export const downloadNoteHtml = async (taskId, filename) => {
-  const response = await api.get('/note/' + taskId + '/html', { responseType: 'blob' });
-  const url = URL.createObjectURL(new Blob([response.data]));
-  const a = document.createElement('a'); a.href = url;
-  a.download = filename || 'note.html';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+export const downloadNoteHtml = async (taskId, filename) =>
+  downloadBlob('/note/' + taskId + '/html', filename || 'note.html', 'text/html');
 
 export default api;

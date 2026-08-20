@@ -1,13 +1,72 @@
 """Note API - multi-version notes, editing, polish, flashcards, RAG Q&A."""
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from ..core.engine import get_engine
+from ..services.ai_service import DEFAULT_NOTE_STYLE, NOTE_STYLE_IDS, VALID_NOTE_STYLES
 
 router = APIRouter()
+
+
+def _safe_filename(name: str, ext: str) -> str:
+    """Return a safe Content-Disposition header value with RFC 5987 encoding for non-ASCII names."""
+    safe = re.sub(r'[^a-zA-Z0-9_\-.]', '_', name)
+    encoded = quote(f"{name}.{ext}", safe="")
+    return f"attachment; filename=\"{safe}.{ext}\"; filename*=UTF-8''{encoded}"
+
+
+def _markdown_to_html(content: str) -> str:
+    import markdown
+
+    html_content = markdown.markdown(content, extensions=["tables", "fenced_code", "codehilite", "toc"])
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7;max-width:860px;margin:0 auto;padding:2rem;color:#1a1a1a;background:#fafafa}}
+    h1{{font-size:1.8rem;border-bottom:2px solid #e2e8f0;padding-bottom:.5rem;margin-top:2rem}}h2{{font-size:1.4rem;color:#2563eb;margin-top:1.5rem}}
+    h3{{font-size:1.15rem;margin-top:1.2rem}}code{{background:#f1f5f9;padding:.15rem .4rem;border-radius:4px;font-size:.9em}}
+    pre{{background:#f8fafc;padding:1rem;border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto}}pre code{{background:none;padding:0}}
+    table{{border-collapse:collapse;width:100%;margin:1rem 0}}th,td{{border:1px solid #e2e8f0;padding:.5rem .75rem;text-align:left}}
+    th{{background:#f8fafc;font-weight:600}}blockquote{{border-left:4px solid #2563eb;padding:.5rem 1rem;margin:1rem 0;background:#eff6ff;border-radius:0 4px 4px 0}}
+    img{{max-width:100%;height:auto;border-radius:8px}}a{{color:#2563eb}}
+    </style></head><body>{html_content}</body></html>"""
+
+
+def _validate_pdf(pdf_bytes: bytes) -> bytes:
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) < 100 or not pdf_bytes.startswith(b"%PDF-"):
+        raise RuntimeError("PDF renderer returned invalid PDF data")
+    return bytes(pdf_bytes)
+
+
+def _render_pdf(styled_html: str) -> bytes:
+    """Render and validate PDF bytes before exposing them as a PDF response."""
+    errors = []
+    try:
+        from xhtml2pdf import pisa
+        pdf_buf = io.BytesIO()
+        result = pisa.CreatePDF(styled_html, dest=pdf_buf, encoding="utf-8")
+        if getattr(result, "err", 0):
+            raise RuntimeError(f"xhtml2pdf reported {result.err} rendering error(s)")
+        return _validate_pdf(pdf_buf.getvalue())
+    except Exception as exc:
+        errors.append(f"xhtml2pdf: {exc}")
+
+    try:
+        from weasyprint import HTML
+        return _validate_pdf(HTML(string=styled_html).write_pdf())
+    except Exception as exc:
+        errors.append(f"weasyprint: {exc}")
+
+    raise RuntimeError("; ".join(errors))
+
+
+@router.get("/api/note-styles", tags=["notes"])
+async def get_note_styles():
+    """Return note styles supported by both generation and polishing."""
+    return {"styles": NOTE_STYLE_IDS}
 
 
 @router.get("/api/history", tags=["notes"])
@@ -108,7 +167,15 @@ async def polish_note(task_id: str, body: dict = {}):
     if not task:
         raise HTTPException(404, "Task not found")
 
-    style = body.get("style", task.get("note_style", "standard"))
+    requested_style = body.get("style")
+    if requested_style is None:
+        style = task.get("note_style") or DEFAULT_NOTE_STYLE
+        if style not in VALID_NOTE_STYLES:
+            style = DEFAULT_NOTE_STYLE
+    elif not isinstance(requested_style, str) or requested_style not in VALID_NOTE_STYLES:
+        raise HTTPException(422, "Unsupported note style")
+    else:
+        style = requested_style
     extra = body.get("extra_instructions", "")
 
     # Get latest content
@@ -158,9 +225,6 @@ async def revert_note_version(task_id: str, version_id: str):
 
 @router.get("/api/note/{task_id}/pdf", tags=["notes"])
 async def download_note_pdf(task_id: str):
-    import markdown
-    from weasyprint import HTML
-
     engine = get_engine()
     task = engine.checkpoint.get_task(task_id)
     if not task:
@@ -174,18 +238,13 @@ async def download_note_pdf(task_id: str):
         raise HTTPException(404, "Note content is empty")
 
     filename = Path(task["original_filename"]).stem
-    html_content = markdown.markdown(content, extensions=["tables", "fenced_code", "codehilite", "toc"])
-    styled_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body{{font-family:-apple-system,sans-serif;line-height:1.6;max-width:800px;margin:0 auto;padding:20px;color:#333}}
-    h1{{font-size:24px;border-bottom:2px solid #e2e8f0;padding-bottom:8px}}h2{{font-size:20px;color:#4f8ef7}}
-    h3{{font-size:16px}}code{{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:13px}}
-    pre{{background:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto}}pre code{{background:none;padding:0}}
-    table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #e2e8f0;padding:8px 12px}}
-    th{{background:#f8fafc;font-weight:600}}blockquote{{border-left:4px solid #4f8ef7;padding:8px 16px;background:#f8fafc}}
-    </style></head><body>{html_content}</body></html>"""
-    pdf_bytes = HTML(string=styled_html).write_pdf()
+    styled_html = _markdown_to_html(content)
+    try:
+        pdf_bytes = _render_pdf(styled_html)
+    except Exception as exc:
+        raise HTTPException(500, f"PDF generation failed: {exc}")
     return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
+                    headers={"Content-Disposition": _safe_filename(filename, "pdf")})
 
 
 @router.get("/api/note/{task_id}/word", tags=["notes"])
@@ -230,7 +289,7 @@ async def download_note_word(task_id: str):
     doc.save(buf)
     buf.seek(0)
     return Response(content=buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}.docx"'})
+                    headers={"Content-Disposition": _safe_filename(filename, "docx")})
 
 
 
@@ -284,12 +343,11 @@ async def download_note_html(task_id: str):
     return Response(
         content=full_html.encode("utf-8"),
         media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}.html"'},
+        headers={"Content-Disposition": _safe_filename(filename, "html")},
     )
 
 @router.post("/api/notes/download-zip", tags=["notes"])
 async def download_notes_zip(task_ids: list[str], format: str = "md"):
-    import markdown as md_lib
     engine = get_engine()
     buf = io.BytesIO()
     count = 0
@@ -306,21 +364,10 @@ async def download_notes_zip(task_ids: list[str], format: str = "md"):
                 continue
             stem = Path(task["original_filename"]).stem
             if format == "pdf":
-                html_content = md_lib.markdown(content, extensions=["tables", "fenced_code"])
-                styled = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-                body{{font-family:-apple-system,sans-serif;line-height:1.6;max-width:800px;margin:0 auto;padding:20px;color:#333}}
-                h1{{font-size:22px;border-bottom:2px solid #e2e8f0;padding-bottom:8px}}h2{{font-size:18px;color:#4f8ef7}}
-                h3{{font-size:15px}}code{{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:13px}}
-                pre{{background:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto}}pre code{{background:none;padding:0}}
-                table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #e2e8f0;padding:8px 12px}}
-                th{{background:#f8fafc;font-weight:600}}blockquote{{border-left:4px solid #4f8ef7;padding:8px 16px;background:#f8fafc}}
-                </style></head><body>{html_content}</body></html>"""
                 try:
-                    from weasyprint import HTML as WeasyHTML
-                    pdf_bytes = WeasyHTML(string=styled).write_pdf()
-                    zf.writestr(f"{stem}.pdf", pdf_bytes)
-                except Exception:
-                    zf.writestr(f"{stem}.md", content)
+                    zf.writestr(f"{stem}.pdf", _render_pdf(_markdown_to_html(content)))
+                except Exception as exc:
+                    raise HTTPException(500, f"PDF generation failed for {stem}: {exc}")
             else:
                 zf.writestr(f"{stem}.md", content)
             count += 1

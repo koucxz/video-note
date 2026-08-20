@@ -79,6 +79,11 @@ export const useTaskStore = create((set, get) => ({
     get().fetchTasks()
   },
 
+  // Patch a single task in the list (for WebSocket real-time updates)
+  patchTask: (taskId, patch) => set((s) => ({
+    tasks: s.tasks.map(t => t.task_id === taskId ? { ...t, ...patch } : t),
+  })),
+
   // Derived
   filteredTasks: () => {
     const { tasks, statusFilter, search } = get()

@@ -49,7 +49,7 @@ function colorFor(id) {
 
 export default function CollectionsPage() {
   const navigate = useNavigate()
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const {
     collections,
     addCollection,
@@ -94,7 +94,7 @@ export default function CollectionsPage() {
     <TooltipProvider>
       <div className="space-y-6">
         <div className="flex items-center gap-3"><h1 className="text-xl font-bold tracking-tight">
-            {lang === "zh" ? "分类合集" : "Collections"}
+            {t('collections.title')}
           </h1>
         </div>
 
@@ -124,7 +124,7 @@ export default function CollectionsPage() {
                   <p className="font-semibold">{col.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {col.noteIds.length}{" "}
-                    {lang === "zh" ? "篇笔记" : "notes"}
+                    {t('collections.notes')}
                   </p>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -134,13 +134,7 @@ export default function CollectionsPage() {
                         className="absolute right-2 top-2 h-7 w-7"
                         onClick={(e) => {
                           e.stopPropagation()
-                          if (
-                            confirm(
-                              lang === "zh"
-                                ? "删除此合集？"
-                                : "Delete collection?"
-                            )
-                          )
+                          if (confirm(t('collections.confirmDelete')))
                             removeCollection(col.id)
                         }}
                       >
@@ -148,7 +142,7 @@ export default function CollectionsPage() {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {lang === "zh" ? "删除" : "Delete"}
+                      {t('collections.delete')}
                     </TooltipContent>
                   </Tooltip>
                 </CardContent>
@@ -164,7 +158,7 @@ export default function CollectionsPage() {
             <CardContent className="flex min-h-[120px] flex-col items-center justify-center gap-2 p-5">
               <Plus className="h-6 w-6 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">
-                {lang === "zh" ? "新建合集" : "New Collection"}
+                {t('collections.newCollection')}
               </span>
             </CardContent>
           </Card>
@@ -175,11 +169,11 @@ export default function CollectionsPage() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>
-                {lang === "zh" ? "新建合集" : "New Collection"}
+                {t('collections.newCollection')}
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-2 py-2">
-              <Label>{lang === "zh" ? "合集名称" : "Collection name"}</Label>
+              <Label>{t('collections.collectionName')}</Label>
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -189,10 +183,10 @@ export default function CollectionsPage() {
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-                {lang === "zh" ? "取消" : "Cancel"}
+                {t('common.cancel')}
               </Button>
               <Button onClick={handleCreate}>
-                {lang === "zh" ? "创建" : "Create"}
+                {t('collections.create')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -204,7 +198,7 @@ export default function CollectionsPage() {
             <CardContent className="space-y-4 p-5">
               <h3 className="text-sm font-semibold">
                 {selectedCollection.name} -{" "}
-                {lang === "zh" ? "笔记列表" : "Notes"}
+                {t('collections.noteList')}
               </h3>
 
               {colNotes.length > 0 ? (
@@ -235,7 +229,7 @@ export default function CollectionsPage() {
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  {lang === "zh" ? "暂无笔记" : "No notes"}
+                  {t('collections.noNotes')}
                 </p>
               )}
 
@@ -245,12 +239,12 @@ export default function CollectionsPage() {
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs text-muted-foreground">
-                        {lang === "zh" ? "添加笔记到合集" : "Add notes"}
+                        {t('collections.addNotes')}
                       </p>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs"
                           onClick={() => setSelectedToAdd(new Set(notesNotInCol.map(n => n.task_id)))}>
-                          {lang === "zh" ? "全选" : "All"}
+                          {t('collections.all')}
                         </Button>
                         <Button size="sm" disabled={selectedToAdd.size === 0} className="h-6 px-2 text-xs"
                           onClick={async () => {
@@ -262,7 +256,7 @@ export default function CollectionsPage() {
                             } catch(e) { console.error(e) }
                           }}>
                           <Plus className="mr-1 h-3 w-3" />
-                          {lang === "zh" ? "添加 (" + selectedToAdd.size + ")" : "Add (" + selectedToAdd.size + ")"}
+                          {t('collections.add', { count: selectedToAdd.size })}
                         </Button>
                       </div>
                     </div>

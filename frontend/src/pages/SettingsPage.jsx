@@ -45,7 +45,7 @@ import { cn } from "../lib/utils"
 
 function SettingsPage() {
   const navigate = useNavigate()
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const [uploads, setUploads] = useState([])
   const [totalSize, setTotalSize] = useState(0)
   const [uploadDir, setUploadDir] = useState("")
@@ -88,7 +88,7 @@ function SettingsPage() {
       setShowAddProvider(false)
       loadProviders()
     } catch (err) {
-      alert(lang === "zh" ? "添加失败" : "Add failed")
+      alert(t('settings.addFailed'))
     }
   }
 
@@ -97,17 +97,17 @@ function SettingsPage() {
       await activateProvider(id)
       loadProviders()
     } catch (err) {
-      alert(lang === "zh" ? "激活失败" : "Activate failed")
+      alert(t('settings.activateFailed'))
     }
   }
 
   const handleDeleteProvider = async (id) => {
-    if (!confirm(lang === "zh" ? "确定删除此供应商？" : "Delete this provider?")) return
+    if (!confirm(t('settings.confirmDeleteProvider'))) return
     try {
       await apiDeleteProvider(id)
       loadProviders()
     } catch (err) {
-      alert(lang === "zh" ? "删除失败" : "Delete failed")
+      alert(t('settings.deleteFailed'))
     }
   }
 
@@ -182,7 +182,7 @@ function SettingsPage() {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {
-      alert(lang === "zh" ? "保存失败" : "Save failed")
+      alert(t('settings.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -210,14 +210,14 @@ function SettingsPage() {
 
   const cleanSelected = async () => {
     if (!selected.size) return
-    if (!confirm(`${t.confirmClean || "Delete"} ${selected.size}?`)) return
+    if (!confirm(t('settings.confirmClean', { count: selected.size }))) return
     setCleaning(true)
     try {
       await api.post("/storage/uploads/clean", [...selected])
       setSelected(new Set())
       await loadUploads()
     } catch {
-      alert(t.cleanFailed)
+      alert(t('settings.cleanFailed'))
     } finally {
       setCleaning(false)
     }
@@ -225,13 +225,7 @@ function SettingsPage() {
 
   const cleanAll = async () => {
     if (!uploads.length) return
-    if (
-      !confirm(
-        `${t.confirmCleanAll || "Delete ALL"} ${uploads.length} (${formatSize(
-          totalSize
-        )})?`
-      )
-    )
+    if (!confirm(t('settings.confirmCleanAll', { count: uploads.length, size: formatSize(totalSize) })))
       return
     setCleaning(true)
     try {
@@ -239,7 +233,7 @@ function SettingsPage() {
       setSelected(new Set())
       await loadUploads()
     } catch {
-      alert(t.cleanFailed)
+      alert(t('settings.cleanFailed'))
     } finally {
       setCleaning(false)
     }
@@ -282,7 +276,7 @@ function SettingsPage() {
           {section !== "asr" && (
             <div className="space-y-1.5">
               <Label className="text-xs">
-                {lang === "zh" ? "协议" : "Protocol"}
+                {t('settings.protocol')}
               </Label>
               <Select
                 value={cfg.type || "openai"}
@@ -300,7 +294,7 @@ function SettingsPage() {
           )}
           <div className="space-y-1.5">
             <Label className="text-xs">
-              {lang === "zh" ? "模型" : "Model"}
+              {t('settings.model')}
             </Label>
             <Input
               value={cfg.model || ""}
@@ -309,7 +303,7 @@ function SettingsPage() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">
-              {lang === "zh" ? "API 地址" : "Base URL"}
+              {t('settings.apiUrl')}
             </Label>
             <Input
               value={cfg.base_url || ""}
@@ -323,7 +317,7 @@ function SettingsPage() {
               API Key{" "}
               {cfg.api_key_set && (
                 <span className="font-normal text-emerald-500">
-                  ({lang === "zh" ? "已设置" : "set"})
+                  ({t('settings.set')})
                 </span>
               )}
             </Label>
@@ -331,13 +325,7 @@ function SettingsPage() {
               <Input
                 type={keyVisible ? "text" : "password"}
                 value={cfg.api_key || ""}
-                placeholder={
-                  cfg.api_key_set
-                    ? lang === "zh"
-                      ? "留空保持不变"
-                      : "Keep current"
-                    : "sk-..."
-                }
+                placeholder={cfg.api_key_set ? t('settings.keepCurrent') : "sk-..."}
                 onChange={(e) =>
                   updateEdit(section, "api_key", e.target.value)
                 }
@@ -365,13 +353,7 @@ function SettingsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {keyVisible
-                      ? lang === "zh"
-                        ? "隐藏"
-                        : "Hide"
-                      : lang === "zh"
-                      ? "显示"
-                      : "Show"}
+                    {keyVisible ? t('settings.hide') : t('settings.show')}
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -393,7 +375,7 @@ function SettingsPage() {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {lang === "zh" ? "复制" : "Copy"}
+                      {t('settings.copy')}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -412,7 +394,7 @@ function SettingsPage() {
                   className="h-4 w-4 cursor-pointer"
                 />
                 <span className="text-sm">
-                  {lang === "zh" ? "启用语音识别" : "Enable ASR"}
+                  {t('settings.enableASR')}
                 </span>
               </label>
             </div>
@@ -426,26 +408,26 @@ function SettingsPage() {
     <TooltipProvider>
       <div className="space-y-6">
         <div className="flex items-center gap-3"><Settings className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold">{t.settings || "Settings"}</h1>
+          <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="overview" className="gap-1.5">
               <Activity className="h-4 w-4" />
-              {lang === "zh" ? "概览" : "Overview"}
+              {t('settings.overview')}
             </TabsTrigger>
             <TabsTrigger value="storage" className="gap-1.5">
               <HardDrive className="h-4 w-4" />
-              {lang === "zh" ? "存储管理" : "Storage"}
+              {t('settings.storage')}
             </TabsTrigger>
             <TabsTrigger value="models" className="gap-1.5">
               <Cpu className="h-4 w-4" />
-              {lang === "zh" ? "模型配置" : "Models"}
+              {t('settings.models')}
             </TabsTrigger>
             <TabsTrigger value="about" className="gap-1.5">
               <Settings className="h-4 w-4" />
-              {lang === "zh" ? "关于" : "About"}
+              {t('settings.about')}
             </TabsTrigger>
           </TabsList>
 
@@ -457,7 +439,7 @@ function SettingsPage() {
                   <div className="mb-3 flex items-center gap-2">
                     <Database className="h-4 w-4 text-primary" />
                     <h3 className="text-sm font-semibold">
-                      {lang === "zh" ? "任务统计" : "Task Statistics"}
+                      {t('settings.taskStats')}
                     </h3>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -466,7 +448,7 @@ function SettingsPage() {
                         {stats?.total || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {lang === "zh" ? "总任务" : "Total"}
+                        {t('settings.total')}
                       </p>
                     </div>
                     <div>
@@ -474,7 +456,7 @@ function SettingsPage() {
                         {stats?.completed || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {lang === "zh" ? "已完成" : "Completed"}
+                        {t('settings.completed')}
                       </p>
                     </div>
                     <div>
@@ -482,7 +464,7 @@ function SettingsPage() {
                         {stats?.failed || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {lang === "zh" ? "失败" : "Failed"}
+                        {t('settings.failed')}
                       </p>
                     </div>
                     <div>
@@ -490,7 +472,7 @@ function SettingsPage() {
                         {stats?.processing || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {lang === "zh" ? "处理中" : "Processing"}
+                        {t('settings.processing')}
                       </p>
                     </div>
                   </div>
@@ -502,7 +484,7 @@ function SettingsPage() {
                   <div className="mb-3 flex items-center gap-2">
                     <HardDrive className="h-4 w-4 text-emerald-500" />
                     <h3 className="text-sm font-semibold">
-                      {lang === "zh" ? "存储使用" : "Storage Usage"}
+                      {t('settings.storageUsage')}
                     </h3>
                   </div>
                   <p className="text-2xl font-bold text-emerald-500">
@@ -510,7 +492,7 @@ function SettingsPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {uploads.length}{" "}
-                    {lang === "zh" ? "个视频文件" : "video files"}
+                    {t('settings.videoFiles')}
                   </p>
                   <Button
                     variant="link"
@@ -518,7 +500,7 @@ function SettingsPage() {
                     className="mt-2 h-auto p-0"
                     onClick={() => setActiveTab("storage")}
                   >
-                    {lang === "zh" ? "管理存储 →" : "Manage Storage →"}
+                    {t('settings.manageStorage')}
                   </Button>
                 </CardContent>
               </Card>
@@ -528,7 +510,7 @@ function SettingsPage() {
                   <div className="mb-3 flex items-center gap-2">
                     <Zap className="h-4 w-4 text-amber-500" />
                     <h3 className="text-sm font-semibold">
-                      {lang === "zh" ? "服务状态" : "Service Status"}
+                      {t('settings.serviceStatus')}
                     </h3>
                   </div>
                   <div className="mb-2 flex items-center gap-2">
@@ -539,13 +521,7 @@ function SettingsPage() {
                       )}
                     />
                     <span className="text-sm">
-                      {health
-                        ? lang === "zh"
-                          ? "服务正常"
-                          : "Healthy"
-                        : lang === "zh"
-                        ? "服务异常"
-                        : "Unhealthy"}
+                      {health ? t('settings.healthy') : t('settings.unhealthy')}
                     </span>
                   </div>
                   {health && (
@@ -554,13 +530,7 @@ function SettingsPage() {
                       <p>VLM: {health.vlm_model}</p>
                       <p>
                         ASR:{" "}
-                        {health.asr_enabled
-                          ? lang === "zh"
-                            ? "已启用"
-                            : "Enabled"
-                          : lang === "zh"
-                          ? "已禁用"
-                          : "Disabled"}
+                        {health.asr_enabled ? t('settings.enabled') : t('settings.disabled')}
                       </p>
                     </div>
                   )}
@@ -576,15 +546,15 @@ function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <HardDrive className="h-5 w-5 text-primary" />
-                    {lang === "zh" ? "上传视频管理" : "Uploaded Videos"}
+                    {t('settings.uploadedVideos')}
                   </CardTitle>
                   <div className="flex items-center gap-3 text-sm text-muted-foreground">
                     <span>
-                      {lang === "zh" ? "文件数" : "Files"}:{" "}
+                      {t('settings.files')}:{" "}
                       <strong>{uploads.length}</strong>
                     </span>
                     <span>
-                      {lang === "zh" ? "总大小" : "Total"}:{" "}
+                      {t('settings.totalSize')}:{" "}
                       <strong>{formatSize(totalSize)}</strong>
                     </span>
                   </div>
@@ -600,8 +570,8 @@ function SettingsPage() {
                         <Square className="mr-1.5 h-4 w-4" />
                       )}
                       {selected.size > 0
-                        ? `${t.selected || "Selected"} ${selected.size}`
-                        : t.selectAll || "Select All"}
+                        ? t('settings.selectedCount', { count: selected.size })
+                        : t('common.selectAll')}
                     </Button>
                     <Button
                       variant="outline"
@@ -614,7 +584,7 @@ function SettingsPage() {
                       ) : (
                         <Trash2 className="mr-1.5 h-4 w-4" />
                       )}
-                      {t.cleanSelected}
+                      {t('settings.cleanSelected')}
                       {selected.size > 0 && ` (${selected.size})`}
                     </Button>
                     <Button
@@ -628,7 +598,7 @@ function SettingsPage() {
                       ) : (
                         <AlertTriangle className="mr-1.5 h-4 w-4" />
                       )}
-                      {t.cleanAll} ({formatSize(totalSize)})
+                      {t('settings.cleanAll')} ({formatSize(totalSize)})
                     </Button>
                   </div>
                 )}
@@ -636,7 +606,7 @@ function SettingsPage() {
                 {uploads.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                     <HardDrive className="mb-2 h-8 w-8" />
-                    <p>{t.noUploads}</p>
+                    <p>{t('settings.noUploads')}</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -689,11 +659,11 @@ function SettingsPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">
-                    {lang === "zh" ? "\u4f9b\u5e94\u5546\u7ba1\u7406" : "Provider Management"}
+                    {t('settings.providers')}
                   </CardTitle>
                   <Button size="sm" variant="outline" onClick={() => setShowAddProvider(!showAddProvider)}>
                     <Plus className="mr-1.5 h-4 w-4" />
-                    {lang === "zh" ? "\u6dfb\u52a0\u4f9b\u5e94\u5546" : "Add Provider"}
+                    {t('settings.addProvider')}
                   </Button>
                 </div>
               </CardHeader>
@@ -703,26 +673,26 @@ function SettingsPage() {
                   <Card className="border-dashed">
                     <CardContent className="space-y-3 p-4">
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <div><Label>{lang === "zh" ? "\u540d\u79f0" : "Name"}</Label>
+                        <div><Label>{t('settings.name')}</Label>
                           <Input value={newProvider.name} onChange={e => setNewProvider({...newProvider, name: e.target.value})} placeholder="My Provider" className="mt-1" /></div>
-                        <div><Label>{lang === "zh" ? "\u7c7b\u578b" : "Type"}</Label>
+                        <div><Label>{t('settings.type')}</Label>
                           <select value={newProvider.type} onChange={e => setNewProvider({...newProvider, type: e.target.value})}
                             className="mt-1 flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm">
                             <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic</option>
                           </select></div>
-                        <div><Label>API Key</Label>
+                        <div><Label>{t('settings.apiKey')}</Label>
                           <Input type="password" value={newProvider.api_key} onChange={e => setNewProvider({...newProvider, api_key: e.target.value})} placeholder="sk-..." className="mt-1" /></div>
-                        <div><Label>Base URL</Label>
+                        <div><Label>{t('settings.apiUrl')}</Label>
                           <Input value={newProvider.base_url} onChange={e => setNewProvider({...newProvider, base_url: e.target.value})} placeholder="https://api.openai.com/v1" className="mt-1" /></div>
-                        <div><Label>{lang === "zh" ? "\u6587\u672c\u6a21\u578b" : "LLM Model"}</Label>
+                        <div><Label>{t('settings.llmModel')}</Label>
                           <Input value={newProvider.model} onChange={e => setNewProvider({...newProvider, model: e.target.value})} placeholder="gpt-4o" className="mt-1" /></div>
-                        <div><Label>{lang === "zh" ? "\u89c6\u89c9\u6a21\u578b" : "VLM Model"}</Label>
+                        <div><Label>{t('settings.vlmModel')}</Label>
                           <Input value={newProvider.vlm_model} onChange={e => setNewProvider({...newProvider, vlm_model: e.target.value})} placeholder="gpt-4o" className="mt-1" /></div>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" onClick={handleAddProvider}>{lang === "zh" ? "\u4fdd\u5b58" : "Save"}</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setShowAddProvider(false)}>{lang === "zh" ? "\u53d6\u6d88" : "Cancel"}</Button>
+                        <Button size="sm" onClick={handleAddProvider}>{t('common.save')}</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setShowAddProvider(false)}>{t('common.cancel')}</Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -731,7 +701,7 @@ function SettingsPage() {
                 {/* Provider list */}
                 {providers.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">
-                    {lang === "zh" ? "\u6682\u65e0\u4f9b\u5e94\u5546\u914d\u7f6e" : "No providers configured"}
+                    {t('settings.noProviders')}
                   </p>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -747,10 +717,10 @@ function SettingsPage() {
                             </div>
                             <div className="flex gap-1">
                               {p.is_active ? (
-                                <Badge variant="success" className="text-xs">{lang === "zh" ? "\u5f53\u524d" : "Active"}</Badge>
+                                <Badge variant="success" className="text-xs">{t('settings.active')}</Badge>
                               ) : (
                                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleActivateProvider(p.id)}>
-                                  {lang === "zh" ? "\u542f\u7528" : "Use"}
+                                  {t('settings.use')}
                                 </Button>
                               )}
                               <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteProvider(p.id)}>

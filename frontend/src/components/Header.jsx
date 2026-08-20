@@ -1,40 +1,19 @@
-﻿import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
-import {
-  History,
-  Upload,
-  Sparkles,
-  Settings,
-  Globe,
-  Folder,
-  BookOpen,
-} from "lucide-react"
+import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen } from "lucide-react"
 import { Button } from "./ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 
 function Header() {
   const location = useLocation()
-  const { t, lang, toggleLang } = useLang()
+  const { t, toggleLang } = useLang()
 
   const navItems = [
-    { to: "/", icon: Upload, label: t.upload },
-    { to: "/history", icon: History, label: t.history },
-    {
-      to: "/collections",
-      icon: Folder,
-      label: lang === "zh" ? "合集" : "Collections",
-    },
-    {
-      to: "/rag",
-      icon: BookOpen,
-      label: lang === "zh" ? "\u7b14\u8bb0\u95ee\u7b54" : "Q&A",
-    },
-    { to: "/settings", icon: Settings, label: t.settings },
+    { to: "/", icon: Upload, label: t('header.upload') },
+    { to: "/history", icon: History, label: t('header.history') },
+    { to: "/collections", icon: Folder, label: t('header.collections') },
+    { to: "/rag", icon: BookOpen, label: t('header.noteQA') },
+    { to: "/settings", icon: Settings, label: t('header.settings') },
   ]
 
   return (
@@ -52,20 +31,14 @@ function Header() {
             {navItems.map(({ to, icon: Icon, label }) => (
               <Tooltip key={to}>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant={location.pathname === to ? "secondary" : "ghost"}
-                    size="sm"
-                    asChild
-                  >
+                  <Button variant={location.pathname === to ? "secondary" : "ghost"} size="sm" asChild>
                     <Link to={to} className="flex items-center gap-2">
                       <Icon className="h-4 w-4" />
                       <span className="hidden md:inline">{label}</span>
                     </Link>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>{label}</p>
-                </TooltipContent>
+                <TooltipContent side="bottom"><p>{label}</p></TooltipContent>
               </Tooltip>
             ))}
           </nav>
@@ -73,14 +46,12 @@ function Header() {
           <div className="flex flex-1 items-center justify-end space-x-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="sm" onClick={toggleLang}>
+                <Button variant="ghost" size="sm" onClick={toggleLang} className="inline-flex items-center gap-1">
                   <Globe className="h-4 w-4" />
-                  <span className="ml-1">{lang === "zh" ? "EN" : "中"}</span>
+                  <span>{t('header.switchLang')}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>{lang === "zh" ? "Switch to English" : "切换到中文"}</p>
-              </TooltipContent>
+              <TooltipContent side="bottom"><p>{t('header.switchLangTip')}</p></TooltipContent>
             </Tooltip>
           </div>
         </div>

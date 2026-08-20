@@ -232,10 +232,13 @@ class VideoNoteEngine:
     async def _generate_outline(self, video_path: str, data: dict) -> dict:
         language = data.get("language", "zh")
         transcript_text = data.get("transcript", {}).get("text", "")
-        if not transcript_text:
-            transcript_text = f"Video file: {Path(video_path).stem}"
-            if data.get("frame_analysis"):
-                transcript_text += f"\n\nVisual content:\n{data['frame_analysis'][:2000]}"
+        subtitle_text = data.get("subtitles", {}).get("text", "")
+        # Use subtitle text as fallback when transcript is empty
+        if not transcript_text and subtitle_text:
+            transcript_text = subtitle_text
+        if not transcript_text.strip():
+            raise ValueError("No content available for note generation: the video has no audio track or subtitles, and ASR is disabled. "
+                             "Please enable ASR in settings or upload a video with audio/subtitles.")
         data["outline"] = await self.ai.generate_outline(transcript_text, language)
         return data
 
@@ -267,7 +270,8 @@ class VideoNoteEngine:
         if frame_analysis:
             context_parts.append(f"?????:\n{frame_analysis}")
         if not context_parts:
-            context_parts.append(f"?????: {Path(video_path).name}")
+            raise ValueError("No content available for note generation: no transcript, subtitle, or frame analysis data. "
+                             "The video may be corrupted or have no readable content.")
         context = "\n\n".join(context_parts)
         # generate_note returns (content, tokens) tuple
         note_content, tokens = await self.ai.generate_note(

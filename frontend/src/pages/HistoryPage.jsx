@@ -2,30 +2,28 @@ import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   Trash2, RefreshCw, Loader2, Clock, CheckCircle2, XCircle,
-  Search, Download, CheckSquare, Square, Star, StarOff,
+  Search, Download, CheckSquare, Square,
   MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play,
 } from "lucide-react"
 import { downloadNoteMd, downloadNotePdf, downloadNotesZip } from "../api/client"
 import { useTaskStore } from "../stores/taskStore"
 import { useLang } from "../context/LangContext"
+import { useGlobalWebSocket } from "../hooks/useWebSocket"
 
 import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
-import { Skeleton } from "../components/ui/skeleton"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "../components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu"
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "../components/ui/tooltip"
 import { cn } from "../lib/utils"
 
 const statusConfig = {
-  completed: { icon: CheckCircle2, variant: "success", color: "text-emerald-500", bg: "bg-emerald-500/10", label: { zh: "\u5df2\u5b8c\u6210", en: "Done" } },
-  failed: { icon: XCircle, variant: "destructive", color: "text-destructive", bg: "bg-destructive/10", label: { zh: "\u5931\u8d25", en: "Failed" } },
-  processing: { icon: Loader2, variant: "default", color: "text-primary", bg: "bg-primary/10", label: { zh: "\u5904\u7406\u4e2d", en: "Running" } },
-  pending: { icon: Clock, variant: "secondary", color: "text-muted-foreground", bg: "bg-muted", label: { zh: "\u7b49\u5f85\u4e2d", en: "Pending" } },
-  paused: { icon: Pause, variant: "secondary", color: "text-amber-500", bg: "bg-amber-500/10", label: { zh: "\u5df2\u6682\u505c", en: "Paused" } },
+  completed: { icon: CheckCircle2, variant: "success", color: "text-emerald-500", bg: "bg-emerald-500/10" },
+  failed: { icon: XCircle, variant: "destructive", color: "text-destructive", bg: "bg-destructive/10" },
+  processing: { icon: Loader2, variant: "default", color: "text-primary", bg: "bg-primary/10" },
+  pending: { icon: Clock, variant: "secondary", color: "text-muted-foreground", bg: "bg-muted" },
+  paused: { icon: Pause, variant: "secondary", color: "text-amber-500", bg: "bg-amber-500/10" },
 }
 
 function HistoryPage() {
@@ -33,14 +31,24 @@ function HistoryPage() {
     tasks, loading, page, totalPages, total, statusFilter, search, selected,
     setFilter, toggleSelect, selectAll, clearSelection, fetchTasks,
     retryTask, deleteTask, deleteSelected, pauseTask, resumeTask, filteredTasks,
+    patchTask,
   } = useTaskStore()
   const [downloadFormat, setDownloadFormat] = useState("md")
   const [downloading, setDownloading] = useState(false)
   const navigate = useNavigate()
   const { t, lang } = useLang()
   const debounceRef = useRef(null)
+  const wsUpdates = useGlobalWebSocket()
 
   useEffect(() => { fetchTasks(1) }, [])
+
+  useEffect(() => {
+    if (!wsUpdates?.length) return
+    const latest = wsUpdates[wsUpdates.length - 1]
+    if (!latest?.task_id) return
+    patchTask(latest.task_id, { status: latest.status, progress: latest.progress, stage: latest.stage })
+    if (latest.status === "completed" || latest.status === "failed") fetchTasks()
+  }, [wsUpdates])
 
   const handleSearch = (val) => {
     setFilter("search", val)
@@ -50,13 +58,13 @@ function HistoryPage() {
 
   const handleDelete = async (e, taskId) => {
     e.stopPropagation()
-    if (!confirm(t.confirmDelete)) return
-    try { await deleteTask(taskId) } catch { alert(t.deleteFailed) }
+    if (!confirm(t('common.confirmDelete'))) return
+    try { await deleteTask(taskId) } catch { alert(t('common.deleteFailed')) }
   }
 
   const handleRetry = async (e, taskId) => {
     e.stopPropagation()
-    try { await retryTask(taskId) } catch { alert(t.retryFailed) }
+    try { await retryTask(taskId) } catch { alert(t('common.retryFailed')) }
   }
 
   const handlePauseResume = async (e, task) => {
@@ -65,12 +73,6 @@ function HistoryPage() {
       if (task.status === "paused") await resumeTask(task.task_id)
       else await pauseTask(task.task_id)
     } catch { /* ignore */ }
-  }
-
-  const doDownload = (taskId, name) => {
-    const base = (name || "note").replace(/\.[^.]+$/, "")
-    if (downloadFormat === "pdf") downloadNotePdf(taskId, base + ".pdf")
-    else downloadNoteMd(taskId, base + ".md")
   }
 
   const handleBatchZip = async () => {
@@ -96,25 +98,28 @@ function HistoryPage() {
     </div>
   )
 
+  const filterButtons = [
+    ["all", t('common.all'), total],
+    ["completed", t('status.completed'), tasks.filter(h => h.status === "completed").length],
+    ["processing", t('status.processing'), tasks.filter(h => h.status === "processing").length],
+    ["failed", t('status.failed'), tasks.filter(h => h.status === "failed").length],
+    ["pending", t('status.pending'), tasks.filter(h => h.status === "pending").length],
+    ["paused", t('status.paused'), tasks.filter(h => h.status === "paused").length],
+  ]
+
   return (
     <TooltipProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-xl font-bold tracking-tight">{t.history}</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t('history.title')}</h1>
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder={lang === "zh" ? "\u641c\u7d22..." : "Search..."} value={search} onChange={e => handleSearch(e.target.value)} className="pl-9" />
+            <Input placeholder={t('common.search')} value={search} onChange={e => handleSearch(e.target.value)} className="pl-9" />
           </div>
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          {[["all", lang === "zh" ? "\u5168\u90e8" : "All", total],
-            ["completed", t.completed, tasks.filter(h => h.status === "completed").length],
-            ["processing", t.processing, tasks.filter(h => h.status === "processing").length],
-            ["failed", t.failed, tasks.filter(h => h.status === "failed").length],
-            ["pending", t.pending, tasks.filter(h => h.status === "pending").length],
-            ["paused", lang === "zh" ? "\u5df2\u6682\u505c" : "Paused", tasks.filter(h => h.status === "paused").length],
-          ].map(([key, label, count]) => (
+          {filterButtons.map(([key, label, count]) => (
             <Button key={key} variant={statusFilter === key ? "default" : "outline"} size="sm" className="rounded-full gap-1.5"
               onClick={() => { setFilter("statusFilter", key); fetchTasks(1) }}>
               {label}<span className="text-xs opacity-70">{count}</span>
@@ -125,14 +130,14 @@ function HistoryPage() {
         {selected.size > 0 && (
           <Card><CardContent className="flex flex-wrap items-center gap-3 p-3">
             <Button variant="ghost" size="sm" onClick={clearSelection}>
-              <CheckSquare className="mr-1.5 h-4 w-4" />{lang === "zh" ? "\u53d6\u6d88\u5168\u9009" : "Deselect"}
+              <CheckSquare className="mr-1.5 h-4 w-4" />{t('common.deselect')}
             </Button>
-            <span className="text-sm text-muted-foreground">{selected.size} {lang === "zh" ? "\u5df2\u9009" : "selected"}</span>
+            <span className="text-sm text-muted-foreground">{selected.size} {t('common.selected')}</span>
             <Button variant="destructive" size="sm" onClick={async () => {
-              if (!confirm(lang === "zh" ? "\u786e\u5b9a\u5220\u9664\u9009\u4e2d\u7684 " + selected.size + " \u6761\u8bb0\u5f55\uff1f" : "Delete " + selected.size + " selected records?")) return
-              try { await deleteSelected() } catch { alert(lang === "zh" ? "\u6279\u91cf\u5220\u9664\u5931\u8d25" : "Batch delete failed") }
+              if (!confirm(t('history.confirmDeleteSelected', { count: selected.size }))) return
+              try { await deleteSelected() } catch { alert(t('history.batchDeleteFailed')) }
             }}>
-              <Trash2 className="mr-1.5 h-4 w-4" />{lang === "zh" ? "\u5220\u9664 (" + selected.size + ")" : "Delete (" + selected.size + ")"}
+              <Trash2 className="mr-1.5 h-4 w-4" />{t('history.deleteSelected', { count: selected.size })}
             </Button>
             <div className="flex overflow-hidden rounded-lg border">
               <Button variant={downloadFormat === "md" ? "default" : "ghost"} size="sm" className="rounded-none" onClick={() => setDownloadFormat("md")}>MD</Button>
@@ -140,14 +145,14 @@ function HistoryPage() {
             </div>
             <div className="flex-1" />
             <Button variant="outline" size="sm" onClick={handleBatchZip} disabled={downloading}>
-              <Download className="mr-1.5 h-4 w-4" />{t.downloadZip}
+              <Download className="mr-1.5 h-4 w-4" />{t('history.downloadZip')}
             </Button>
           </CardContent></Card>
         )}
 
-          {filtered.length === 0 ? (
+        {filtered.length === 0 ? (
           <Card><CardContent className="flex flex-col items-center justify-center py-16">
-            <p className="text-muted-foreground">{search ? (lang === "zh" ? "\u672a\u627e\u5230\u5339\u914d\u8bb0\u5f55" : "No matches") : t.noRecords}</p>
+            <p className="text-muted-foreground">{search ? t('history.noMatches') : t('history.noRecords')}</p>
           </CardContent></Card>
         ) : (
           <Card><div className="overflow-x-auto">
@@ -155,12 +160,12 @@ function HistoryPage() {
               <thead>
                 <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
                   <th className="w-8 px-3 py-2"><button onClick={selectAll} className="text-muted-foreground hover:text-foreground">{selected.size > 0 ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></th>
-                  <th className="px-3 py-2">{lang === "zh" ? "\u89c6\u9891" : "Video"}</th>
-                  <th className="px-3 py-2">{lang === "zh" ? "\u72b6\u6001" : "Status"}</th>
-                  <th className="px-3 py-2">{lang === "zh" ? "\u98ce\u683c" : "Style"}</th>
-                  <th className="px-3 py-2 text-right">{lang === "zh" ? "Token" : "Tokens"}</th>
-                  <th className="px-3 py-2">{lang === "zh" ? "\u521b\u5efa\u65f6\u95f4" : "Created"}</th>
-                  <th className="px-3 py-2 text-right">{lang === "zh" ? "\u64cd\u4f5c" : "Actions"}</th>
+                  <th className="px-3 py-2">{t('history.video')}</th>
+                  <th className="px-3 py-2">{t('history.status')}</th>
+                  <th className="px-3 py-2">{t('history.style')}</th>
+                  <th className="px-3 py-2 text-right">{t('history.tokens')}</th>
+                  <th className="px-3 py-2">{t('history.created')}</th>
+                  <th className="px-3 py-2 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -182,21 +187,21 @@ function HistoryPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2"><Badge variant={sc.variant}>{sc.label[lang]}</Badge></td>
-                      <td className="px-3 py-2 text-muted-foreground">{item.note_style || "-"}</td>
+                      <td className="px-3 py-2"><Badge variant={sc.variant}>{t(`status.${item.status}`)}</Badge></td>
+                      <td className="px-3 py-2 text-muted-foreground">{t('noteStyle.' + (item.note_style || '')) || item.note_style || "-"}</td>
                       <td className="px-3 py-2 text-right font-mono text-xs">{item.totalTokens || "-"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{formatDate(item.createdAt)}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {canView && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}><Eye className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{lang === "zh" ? "\u67e5\u770b\u7b14\u8bb0" : "View"}</TooltipContent></Tooltip>}
-                          {item.status === "failed" && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handleRetry(e, item.task_id)}><RotateCcw className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t.retry}</TooltipContent></Tooltip>}
-                          {(item.status === "processing" || item.status === "paused") && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handlePauseResume(e, item)}>{item.status === "paused" ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}</Button></TooltipTrigger><TooltipContent>{item.status === "paused" ? (lang === "zh" ? "\u7ee7\u7eed" : "Resume") : (lang === "zh" ? "\u6682\u505c" : "Pause")}</TooltipContent></Tooltip>}
+                          {canView && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}><Eye className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('history.viewNote')}</TooltipContent></Tooltip>}
+                          {item.status === "failed" && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handleRetry(e, item.task_id)}><RotateCcw className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('common.retry')}</TooltipContent></Tooltip>}
+                          {(item.status === "processing" || item.status === "paused") && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handlePauseResume(e, item)}>{item.status === "paused" ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}</Button></TooltipTrigger><TooltipContent>{item.status === "paused" ? t('history.resume') : t('history.pause')}</TooltipContent></Tooltip>}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               {canView && (<><DropdownMenuItem onClick={() => downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md")}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem><DropdownMenuItem onClick={() => downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf")}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem></>)}
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => handleDelete(e, item.task_id)}><Trash2 className="mr-2 h-4 w-4" />{t.delete}</DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => handleDelete(e, item.task_id)}><Trash2 className="mr-2 h-4 w-4" />{t('common.delete')}</DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>

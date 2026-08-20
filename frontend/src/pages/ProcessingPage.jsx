@@ -19,77 +19,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Separator } from "../components/ui/separator"
 import { cn } from "../lib/utils"
 
-const ERROR_KIND_MESSAGES = {
-  zh: {
-    network: {
-      icon: Wifi,
-      title: "网络连接失败",
-      hint: "请检查网络或 API 服务是否可用",
-    },
-    api: {
-      icon: AlertTriangle,
-      title: "AI 服务错误",
-      hint: "API 密钥无效或服务暂时不可用",
-    },
-    ffmpeg: {
-      icon: Scissors,
-      title: "视频处理失败",
-      hint: "视频格式可能不支持，或 FFmpeg 未安装",
-    },
-    format: {
-      icon: FileQuestion,
-      title: "文件格式问题",
-      hint: "视频文件可能已损坏或格式不支持",
-    },
-    interrupted: {
-      icon: RefreshCw,
-      title: "处理被中断",
-      hint: "服务可能重启过，点击重试继续",
-    },
-    unknown: {
-      icon: AlertTriangle,
-      title: "处理失败",
-      hint: "发生未知错误，请重试",
-    },
-  },
-  en: {
-    network: {
-      icon: Wifi,
-      title: "Network Error",
-      hint: "Check your network or API availability",
-    },
-    api: {
-      icon: AlertTriangle,
-      title: "AI Service Error",
-      hint: "Invalid API key or service unavailable",
-    },
-    ffmpeg: {
-      icon: Scissors,
-      title: "Processing Failed",
-      hint: "Video format may be unsupported or FFmpeg missing",
-    },
-    format: {
-      icon: FileQuestion,
-      title: "Format Issue",
-      hint: "Video file may be corrupt or unsupported",
-    },
-    interrupted: {
-      icon: RefreshCw,
-      title: "Interrupted",
-      hint: "Service may have restarted. Retry to continue.",
-    },
-    unknown: {
-      icon: AlertTriangle,
-      title: "Failed",
-      hint: "An unknown error occurred. Please retry.",
-    },
-  },
+const ERROR_KIND_ICONS = {
+  network: Wifi,
+  api: AlertTriangle,
+  ffmpeg: Scissors,
+  format: FileQuestion,
+  interrupted: RefreshCw,
+  unknown: AlertTriangle,
 }
 
 function ProcessingPage() {
   const { taskId } = useParams()
   const navigate = useNavigate()
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const [status, setStatus] = useState(null)
   const wsStatus = useTaskWebSocket(taskId)
   const [retryCount, setRetryCount] = useState(0)
@@ -145,7 +87,7 @@ function ProcessingPage() {
       await cancelTask(taskId)
       navigate("/history")
     } catch (err) {
-      alert(t.cancelFailed || "Cancel failed")
+      alert(t('processing.cancelFailed'))
     }
   }
 
@@ -155,7 +97,7 @@ function ProcessingPage() {
       setRetryCount(0)
       window.location.reload()
     } catch (err) {
-      alert(t.retryFailed)
+      alert(t('processing.retryFailed'))
     }
   }
 
@@ -171,18 +113,18 @@ function ProcessingPage() {
   const isFailed = status.status === "failed"
   const isAutoRetrying =
     isFailed && retryCount < maxRetries && retryCount > 0
+  const errorInfo = {}
   const errorKind = status.error_kind || "unknown"
-  const errorInfo =
-    ERROR_KIND_MESSAGES[lang]?.[errorKind] ||
-    ERROR_KIND_MESSAGES.zh[errorKind] ||
-    ERROR_KIND_MESSAGES.zh.unknown
-  const ErrorIcon = errorInfo.icon
+  const errorKey = ERROR_KIND_ICONS[errorKind] ? errorKind : 'unknown'
+  errorInfo.icon = ERROR_KIND_ICONS[errorKey]
+  errorInfo.title = t(`processing.error.${errorKey}`)
+  errorInfo.hint = t(`processing.error.${errorKey}Hint`)
 
   return (
     <div className="space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate("/history")}>
         <ArrowLeft className="mr-1.5 h-4 w-4" />
-        {t.back}
+        {t('common.back')}
       </Button>
 
       <Card>
@@ -192,12 +134,12 @@ function ProcessingPage() {
           </CardTitle>
           <p className="text-sm text-muted-foreground">
             {isCompleted
-              ? t.completed
+              ? t('processing.complete')
               : isFailed
               ? isAutoRetrying
-                ? `${t.autoRetry} (${retryCount}/${maxRetries})`
+                ? `${t('processing.autoRetry')} (${retryCount}/${maxRetries})`
                 : errorInfo.title
-              : t.processingWait}
+              : t('processing.processingWait')}
           </p>
         </CardHeader>
         <CardContent>
@@ -221,7 +163,7 @@ function ProcessingPage() {
             <>
               <div className="mb-2 text-4xl">🎉</div>
               <p className="font-semibold text-emerald-600">
-                {t.processComplete}
+                {t('processing.processComplete')}
               </p>
             </>
           ) : isFailed ? (
@@ -229,7 +171,7 @@ function ProcessingPage() {
               <>
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 <p className="mt-3 font-medium text-primary">
-                  {t.autoRetry} ({retryCount}/{maxRetries})
+                  {t('processing.autoRetry')} ({retryCount}/{maxRetries})
                 </p>
               </>
             ) : (
@@ -244,7 +186,7 @@ function ProcessingPage() {
                 {status.error && (
                   <details className="mb-4 w-full max-w-md text-xs text-muted-foreground">
                     <summary className="cursor-pointer">
-                      {lang === "zh" ? "技术详情" : "Technical details"}
+                      {t('processing.technicalDetails')}
                     </summary>
                     <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted p-3 text-xs">
                       {status.error}
@@ -253,7 +195,7 @@ function ProcessingPage() {
                 )}
                 <Button onClick={handleManualRetry}>
                   <RefreshCw className="mr-1.5 h-4 w-4" />
-                  {t.retry}
+                  {t('common.retry')}
                 </Button>
               </>
             )
@@ -266,7 +208,7 @@ function ProcessingPage() {
                 className="mt-4"
                 onClick={handleCancel}
               >
-                {t.cancel || "Cancel"}
+                {t('common.cancel')}
               </Button>
             </>
           )}

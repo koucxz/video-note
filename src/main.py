@@ -33,7 +33,7 @@ Convert videos into structured notes using AI.
 ### Features
 - **Upload videos** - Support MP4, AVI, MOV, MKV, WMV, FLV, WebM, M4V
 - **AI-powered analysis** - Extract keyframes, analyze content with VLM
-- **Multiple note styles** - Standard, Summary, Action, Academic, Creative
+- **Multiple note styles** - Standard, Detailed, Summary, Action, Academic, Creative
 - **Task management** - Track progress, retry failed tasks, cancel processing
 - **Export options** - Download as Markdown or PDF
 - **Storage management** - Manage uploaded video files

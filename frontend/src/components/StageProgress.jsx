@@ -5,13 +5,13 @@ import { cn } from "../lib/utils"
 function StageProgress({ currentStage, status }) {
   const { t } = useLang()
   const STAGES = [
-    { key: "extracting_audio", label: t.extractAudio },
-    { key: "transcribing", label: t.transcribe },
-    { key: "generating_outline", label: t.genOutline },
-    { key: "extracting_keyframes", label: t.extractFrames },
-    { key: "analyzing_content", label: t.analyzeContent },
-    { key: "generating_note", label: t.genNote },
-    { key: "completed", label: t.done },
+    { key: "extracting_audio", label: t('processing.stage.extracting_audio') },
+    { key: "transcribing", label: t('processing.stage.transcribing') },
+    { key: "generating_outline", label: t('processing.stage.generating_outline') },
+    { key: "extracting_keyframes", label: t('processing.stage.extracting_keyframes') },
+    { key: "analyzing_content", label: t('processing.stage.analyzing_content') },
+    { key: "generating_note", label: t('processing.stage.generating_note') },
+    { key: "completed", label: t('processing.stage.completed') },
   ]
   const idx = STAGES.findIndex((s) => s.key === currentStage)
   const fail = status === "failed"

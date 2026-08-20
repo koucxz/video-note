@@ -17,7 +17,7 @@ import { cn } from "../lib/utils"
 export default function FlashcardPage() {
   const { taskId } = useParams()
   const navigate = useNavigate()
-  const { lang } = useLang()
+  const { t } = useLang()
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
   const [current, setCurrent] = useState(0)
@@ -61,7 +61,7 @@ export default function FlashcardPage() {
       <div className="flex flex-col items-center justify-center py-24">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="mt-3 text-sm text-muted-foreground">
-          {lang === "zh" ? "正在生成闪卡..." : "Generating flashcards..."}
+          {t('flashcard.generating')}
         </p>
       </div>
     )
@@ -71,11 +71,11 @@ export default function FlashcardPage() {
     return (
       <div className="flex flex-col items-center justify-center py-24">
         <p className="text-muted-foreground">
-          {lang === "zh" ? "无法生成闪卡" : "No flashcards generated"}
+          {t('flashcard.noCards')}
         </p>
         <Button variant="ghost" className="mt-3" onClick={() => navigate(-1)}>
           <ArrowLeft className="mr-1.5 h-4 w-4" />
-          {lang === "zh" ? "返回" : "Back"}
+          {t('flashcard.back')}
         </Button>
       </div>
     )
@@ -88,7 +88,7 @@ export default function FlashcardPage() {
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
           <ArrowLeft className="mr-1.5 h-4 w-4" />
-          {lang === "zh" ? "返回" : "Back"}
+          {t('flashcard.back')}
         </Button>
         <span className="text-sm text-muted-foreground">
           {current + 1} / {cards.length}
@@ -114,19 +114,13 @@ export default function FlashcardPage() {
       >
         <CardContent className="flex min-h-[280px] flex-col items-center justify-center p-8">
           <p className="mb-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            {flipped
-              ? lang === "zh"
-                ? "答案"
-                : "Answer"
-              : lang === "zh"
-              ? "问题"
-              : "Question"}
+            {flipped ? t('flashcard.back_side') : t('flashcard.front')}
           </p>
           <p className="whitespace-pre-wrap text-center text-base leading-relaxed">
             {flipped ? card.back : card.front}
           </p>
           <p className="mt-5 text-xs text-muted-foreground">
-            {lang === "zh" ? "点击翻转" : "Click to flip"}
+            {t('flashcard.clickToFlip')}
           </p>
         </CardContent>
       </Card>
@@ -135,7 +129,7 @@ export default function FlashcardPage() {
       <div className="flex items-center justify-between">
         <Button variant="outline" onClick={prev} disabled={current === 0}>
           <ChevronLeft className="mr-1 h-4 w-4" />
-          {lang === "zh" ? "上一张" : "Previous"}
+          {t('flashcard.previous')}
         </Button>
         <div className="flex gap-1">
           {cards.map((_, i) => (
@@ -157,7 +151,7 @@ export default function FlashcardPage() {
           onClick={next}
           disabled={current === cards.length - 1}
         >
-          {lang === "zh" ? "下一张" : "Next"}
+          {t('flashcard.next')}
           <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
       </div>
