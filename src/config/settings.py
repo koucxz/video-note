@@ -69,7 +69,13 @@ class ProviderConfig:
     base_url: str = "https://api.openai.com/v1"
 
     def to_dict(self):
-        return {"type": self.type, "model": self.model, "base_url": self.base_url, "api_key": self.api_key, "api_key_set": bool(self.api_key)}
+        key = self.api_key
+        return {
+            "type": self.type, "model": self.model, "base_url": self.base_url,
+            # 明文 key 绝不回传给客户端；留空表示保持当前配置
+            "api_key": "", "api_key_set": bool(key),
+            "api_key_masked": (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else ""),
+        }
 
     def update(self, data: dict):
         if "type" in data and data["type"]:
@@ -90,7 +96,12 @@ class ASRConfig:
     base_url: str = "https://api.openai.com/v1"
 
     def to_dict(self):
-        return {"enabled": self.enabled, "model": self.model, "base_url": self.base_url, "api_key": self.api_key, "api_key_set": bool(self.api_key)}
+        key = self.api_key
+        return {
+            "enabled": self.enabled, "model": self.model, "base_url": self.base_url,
+            "api_key": "", "api_key_set": bool(key),
+            "api_key_masked": (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else ""),
+        }
 
 
 @dataclass
@@ -179,18 +190,16 @@ class AppConfig:
                         lines[i] = prefix + key + ': ' + str(value)
                         return
 
+        # 安全：api_key 一律不写回 config.yaml，保留文件中的 ${ENV} 占位符，
+        # 避免明文密钥落到被 Git 跟踪 / rw 挂载的配置文件里。
         for section, cfg_obj in [('provider', self.provider), ('vlm', self.vlm)]:
             _set_val(lines, section, 'type', cfg_obj.type)
             _set_val(lines, section, 'model', cfg_obj.model)
             _set_val(lines, section, 'base_url', cfg_obj.base_url)
-            if cfg_obj.api_key and not cfg_obj.api_key.startswith(chr(36)):
-                _set_val(lines, section, 'api_key', cfg_obj.api_key)
 
         _set_val(lines, 'asr', 'enabled', str(self.asr.enabled).lower())
         _set_val(lines, 'asr', 'model', self.asr.model)
         _set_val(lines, 'asr', 'base_url', self.asr.base_url)
-        if self.asr.api_key and not self.asr.api_key.startswith(chr(36)):
-            _set_val(lines, 'asr', 'api_key', self.asr.api_key)
 
         for k in ('segment_duration', 'keyframe_interval', 'max_retries', 'retry_delay', 'max_concurrent_tasks'):
             _set_val(lines, 'processing', k, getattr(self.processing, k))

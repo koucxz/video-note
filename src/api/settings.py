@@ -26,6 +26,15 @@ def _save_providers(providers: list):
     _PROVIDERS_FILE.write_text(json.dumps(providers, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _public_provider(p: dict) -> dict:
+    """对外视图：剔除明文 api_key，只保留掩码与是否已配置。"""
+    key = p.get("api_key") or ""
+    out = {k: v for k, v in p.items() if k != "api_key"}
+    out["api_key_set"] = bool(key)
+    out["api_key_masked"] = (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else "")
+    return out
+
+
 @router.get("/api/settings", tags=["settings"])
 async def get_settings():
     engine = get_engine()
@@ -87,13 +96,7 @@ class ProviderUpdate(BaseModel):
 
 @router.get("/api/providers", tags=["providers"])
 async def get_providers():
-    providers = _load_providers()
-    # Mask API keys
-    for p in providers:
-        if p.get("api_key"):
-            key = p["api_key"]
-            p["api_key_masked"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-    return providers
+    return [_public_provider(p) for p in _load_providers()]
 
 
 @router.post("/api/providers", tags=["providers"])
@@ -113,7 +116,7 @@ async def add_provider(data: ProviderCreate):
     }
     providers.append(provider)
     _save_providers(providers)
-    return provider
+    return _public_provider(provider)
 
 
 @router.put("/api/providers/{provider_id}", tags=["providers"])
@@ -124,7 +127,7 @@ async def update_provider(provider_id: str, data: ProviderUpdate):
             for k, v in data.model_dump(exclude_none=True).items():
                 p[k] = v
             _save_providers(providers)
-            return p
+            return _public_provider(p)
     raise HTTPException(404, "Provider not found")
 
 

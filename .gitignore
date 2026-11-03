@@ -8,6 +8,9 @@ data/db/*.db
 data/db/*.db-shm
 data/db/*.db-wal
 data/db/providers.json
+frontend/data/db/*.db
+frontend/data/db/*.db-shm
+frontend/data/db/*.db-wal
 data/uploads/*
 data/output/*
 data/temp/*

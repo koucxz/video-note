@@ -28,7 +28,7 @@ AUTH_SECRET = (os.getenv("AUTH_SECRET", "") or AUTH_PASSWORD or "").strip()
 TOKEN_TTL = int(os.getenv("AUTH_TOKEN_TTL", str(30 * 24 * 3600)))  # 默认 30 天
 
 # 无需登录即可访问的路径
-PUBLIC_PATHS = {"/", "/api/health", "/api/auth/login", "/api/auth/config", "/docs", "/redoc", "/openapi.json"}
+PUBLIC_PATHS = {"/", "/api/health", "/api/auth/login", "/api/auth/config"}
 
 
 def auth_enabled() -> bool:

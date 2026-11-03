@@ -1,16 +1,20 @@
 """VideoNote main application."""
 import logging
 import asyncio
+import os
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qs
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
+from fastapi.responses import JSONResponse
 
 from .api import upload_router, upload_chunked_router, task_router, note_router, storage_router, model_config_router, settings_router
 from .api.ws_manager import ws_manager
 from .core.engine import get_engine
+from .api.auth import PUBLIC_PATHS, auth_enabled, check_request_auth, router as auth_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -46,8 +50,10 @@ Convert videos into structured notes using AI.
 """,
     version="1.2.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # 公网部署：关闭交互式文档与 OpenAPI schema，避免把全部接口清单暴露给扫描器
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     openapi_tags=[
         {"name": "upload", "description": "Video upload and processing"},
         {"name": "tasks", "description": "Task management and status"},
@@ -55,11 +61,6 @@ Convert videos into structured notes using AI.
         {"name": "storage", "description": "Storage and file management"},
     ]
 )
-
-import os
-from fastapi.responses import JSONResponse
-
-from .api.auth import PUBLIC_PATHS, auth_enabled, check_request_auth, router as auth_router
 
 
 @app.middleware("http")
@@ -122,8 +123,25 @@ async def health_check():
         "concurrency": engine.config.processing.max_concurrent_tasks,
     }
 
+
+def _ws_token_ok(websocket: WebSocket) -> bool:
+    """WebSocket 握手鉴权：token 走 query 参数（浏览器 WebSocket API 不能自定义头）。
+
+    支持登录签发的 Bearer token 与静态 API_TOKEN；鉴权关闭时放行（本地开发）。
+    """
+    if not auth_enabled():
+        return True
+    qs = parse_qs(websocket.scope.get("query_string", b"").decode("utf-8", "ignore"))
+    token = (qs.get("token") or [""])[0]
+    return check_request_auth(f"Bearer {token}", token)
+
+
 @app.websocket("/ws/task/{task_id}")
-async def websocket_task(websocket, task_id: str):
+async def websocket_task(websocket: WebSocket, task_id: str):
+    # Starlette 1.x 要求 websocket 参数显式标注类型，否则会被当成必填 query 参数并拒绝握手
+    if not _ws_token_ok(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     ws_manager.register(websocket, task_id)
     try:
@@ -134,8 +152,12 @@ async def websocket_task(websocket, task_id: str):
     finally:
         ws_manager.unregister(websocket, task_id)
 
+
 @app.websocket("/ws/all")
-async def websocket_all(websocket):
+async def websocket_all(websocket: WebSocket):
+    if not _ws_token_ok(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     ws_manager.register(websocket)
     try:
@@ -147,8 +169,20 @@ async def websocket_all(websocket):
         ws_manager.unregister(websocket)
 
 
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request, exc: HTTPException):
+    """5xx 统一脱敏：内部异常文本只写服务端日志，不回显给客户端。"""
+    if exc.status_code >= 500:
+        logger.error("HTTP %s %s: %s", exc.status_code, request.url.path, exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": "服务器内部错误，请稍后重试"})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error("Unhandled exception: %s", exc, exc_info=True)
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=500, content={"error": str(exc)})
+    return JSONResponse(status_code=500, content={"error": "服务器内部错误"})
