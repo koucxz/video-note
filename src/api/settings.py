@@ -31,7 +31,7 @@ def _public_provider(p: dict) -> dict:
     key = p.get("api_key") or ""
     out = {k: v for k, v in p.items() if k != "api_key"}
     out["api_key_set"] = bool(key)
-    out["api_key_masked"] = (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else "")
+    out["api_key_masked"] = "****" if key else ""
     return out
 
 
