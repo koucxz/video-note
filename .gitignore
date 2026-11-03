@@ -4,18 +4,18 @@
 !.env.example
 __pycache__/
 *.pyc
-data/db/*.db
-data/db/*.db-shm
-data/db/*.db-wal
-data/db/providers.json
-frontend/data/db/*.db
-frontend/data/db/*.db-shm
-frontend/data/db/*.db-wal
+# Runtime data: never commit databases, uploads, generated output or task state
+data/db/
+data/checkpoint.json
 data/uploads/*
 data/output/*
 data/temp/*
 !data/uploads/.gitkeep
 !data/output/.gitkeep
+frontend/data/db/
+frontend/data/uploads/
+frontend/data/output/
+frontend/data/temp/
 node_modules/
 dist/
 
