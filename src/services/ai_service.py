@@ -186,7 +186,7 @@ class OpenAIProvider(AIProvider):
             
             try:
                 response = await self._vlm.chat.completions.create(
-                    model=self.vlm_model, messages=[{"role": "user", "content": content}], max_tokens=2048)
+                    model=self.vlm_model, messages=[{"role": "user", "content": content}], max_tokens=4096)
                 analysis = response.choices[0].message.content or ""
                 if analysis:
                     all_analyses.append(analysis)
@@ -297,7 +297,7 @@ class AnthropicProvider(AIProvider):
             content_blocks.append({'type': 'text', 'text': prompt})
             try:
                 response = await self._client.messages.create(
-                    model=self.vlm_model, max_tokens=2048,
+                    model=self.vlm_model, max_tokens=4096,
                     messages=[{'role': 'user', 'content': content_blocks}],
                 )
                 text = ''.join(b.text for b in response.content if hasattr(b, 'text'))
