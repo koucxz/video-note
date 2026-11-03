@@ -93,18 +93,15 @@ export default function LoginPage({ onSuccess }) {
             </Button>
           </form>
 
-          <div className="mt-6 space-y-1.5 text-center text-xs text-muted-foreground">
-            <p>本系统为私有实例，账号由管理员配置，不开放注册</p>
-            <p>
-              申请账号请联系{' '}
-              <a
-                href="mailto:koucxz@hotmail.com?subject=VideoNote%20%E8%B4%A6%E5%8F%B7%E7%94%B3%E8%AF%B7"
-                className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:text-primary hover:decoration-primary"
-              >
-                koucxz@hotmail.com
-              </a>
-            </p>
-          </div>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            申请账号请联系{' '}
+            <a
+              href="mailto:koucxz@hotmail.com?subject=VideoNote%20%E8%B4%A6%E5%8F%B7%E7%94%B3%E8%AF%B7"
+              className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:text-primary hover:decoration-primary"
+            >
+              koucxz@hotmail.com
+            </a>
+          </p>
         </CardContent>
       </Card>
     </div>

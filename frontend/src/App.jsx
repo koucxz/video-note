@@ -68,7 +68,10 @@ function AuthGate() {
     getAuthConfig()
       .then((cfg) => {
         if (!alive) return
-        setStatus(!cfg.auth_required || getToken() ? 'authed' : 'anon')
+        // 只有拿到合法配置才信 auth_required；返回非 JSON（如反代回落到 index.html）时回落到本地 token 判断
+        const valid = cfg && typeof cfg === 'object' && typeof cfg.auth_required === 'boolean'
+        if (valid && !cfg.auth_required) setStatus('authed')
+        else setStatus(getToken() ? 'authed' : 'anon')
       })
       .catch(() => {
         if (!alive) return

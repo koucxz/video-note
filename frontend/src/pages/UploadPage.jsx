@@ -163,7 +163,7 @@ export default function UploadPage() {
       <div className="space-y-4">
 
         {/* ====== 统计概览 ====== */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             { val: history.length, label: t('upload.totalVideos'), icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-50' },
             { val: completed, label: t('upload.totalNotes'), icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
