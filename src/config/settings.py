@@ -74,7 +74,7 @@ class ProviderConfig:
             "type": self.type, "model": self.model, "base_url": self.base_url,
             # 明文 key 绝不回传给客户端；留空表示保持当前配置
             "api_key": "", "api_key_set": bool(key),
-            "api_key_masked": (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else ""),
+            "api_key_masked": "****" if key else "",
         }
 
     def update(self, data: dict):
@@ -100,7 +100,7 @@ class ASRConfig:
         return {
             "enabled": self.enabled, "model": self.model, "base_url": self.base_url,
             "api_key": "", "api_key_set": bool(key),
-            "api_key_masked": (key[:4] + "***" + key[-4:]) if len(key) > 12 else ("***" if key else ""),
+            "api_key_masked": "****" if key else "",
         }
 
 
