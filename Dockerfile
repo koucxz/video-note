@@ -11,7 +11,15 @@ ENV PYTHONUNBUFFERED=1 \
 # ffmpeg: 音视频处理
 # libpango/libcairo/libgdk-pixbuf: weasyprint 渲染 PDF
 # fonts-noto-cjk: 中文 PDF 不出方块
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 先把 apt 源换成腾讯云内网镜像（国内构建快 10 倍以上）
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|deb.debian.org|mirrors.tencentyun.com|g; s|security.debian.org|mirrors.tencentyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|deb.debian.org|mirrors.tencentyun.com|g; s|security.debian.org|mirrors.tencentyun.com|g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
         libpango-1.0-0 \
@@ -25,11 +33,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
+# pip 走腾讯云镜像，避免 pypi 直连超时
+RUN pip config set global.index-url https://mirrors.cloud.tencent.com/pypi/simple \
+    && pip config set global.trusted-host mirrors.cloud.tencent.com
+
 WORKDIR /app
 
 # 先装 CPU-only torch：否则 sentence-transformers 会拉 CUDA 版 torch(约 2.5GB)，
 # 2C2G 机器上既费磁盘也容易构建 OOM。
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
+RUN pip install torch \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://mirrors.cloud.tencent.com/pypi/simple
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
