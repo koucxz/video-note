@@ -1,12 +1,18 @@
 import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
-import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen } from "lucide-react"
+import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, LogOut } from "lucide-react"
 import { Button } from "./ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
+import { clearAuthToken, getToken } from "../api/client"
 
 function Header() {
   const location = useLocation()
   const { t, toggleLang } = useLang()
+
+  const handleLogout = () => {
+    clearAuthToken()
+    window.dispatchEvent(new CustomEvent('vn-unauthorized'))
+  }
 
   const navItems = [
     { to: "/", icon: Upload, label: t('header.upload') },
@@ -53,6 +59,17 @@ function Header() {
               </TooltipTrigger>
               <TooltipContent side="bottom"><p>{t('header.switchLangTip')}</p></TooltipContent>
             </Tooltip>
+
+            {getToken() && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" onClick={handleLogout}>
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p>退出登录</p></TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </div>
       </header>

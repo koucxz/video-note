@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router
+from .api import upload_router, upload_chunked_router, task_router, note_router, storage_router, model_config_router, settings_router
 from .api.ws_manager import ws_manager
 from .core.engine import get_engine
 
@@ -57,16 +57,44 @@ Convert videos into structured notes using AI.
 )
 
 import os
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+from fastapi.responses import JSONResponse
+
+from .api.auth import PUBLIC_PATHS, auth_enabled, check_request_auth, router as auth_router
+
+
+@app.middleware("http")
+async def _auth_guard(request, call_next):
+    """单用户登录守卫：未登录一律 401。OPTIONS 预检与公开路径放行。"""
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+    if not auth_enabled():
+        return await call_next(request)
+    if not check_request_auth(
+        request.headers.get("authorization"),
+        request.headers.get("x-vn-token"),
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "未登录或登录已过期"},
+        )
+    return await call_next(request)
+
+
+_cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
+_cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+_allow_any_origin = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in cors_origins],
-    allow_credentials=True,
+    # 用 header 传 token，不依赖 cookie，所以允许任意源时可以不启用 credentials
+    allow_origins=["*"] if _allow_any_origin else _cors_origins,
+    allow_credentials=not _allow_any_origin,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(upload_router)
+app.include_router(upload_chunked_router)
 app.include_router(task_router)
 app.include_router(note_router)
 app.include_router(storage_router)
