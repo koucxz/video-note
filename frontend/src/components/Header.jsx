@@ -55,7 +55,7 @@ function Header() {
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="ghost" size="sm" asChild>
                   <a
                     href={GITHUB_URL}
                     target="_blank"
