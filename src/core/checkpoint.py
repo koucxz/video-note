@@ -70,9 +70,9 @@ class CheckpointManager:
             for col, default in [("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
                                   ("processing_overrides", "{}"), ("total_tokens", "0"),
                                   ("platform", ""), ("video_url", ""), ("model_name", ""),
-                                  ("quick_hash", "")]:
+                                  ("quick_hash", ""), ("file_size", "0")]:
                 try:
-                    col_type = "TEXT" if col != "total_tokens" else "INTEGER"
+                    col_type = "INTEGER" if col in ("total_tokens", "file_size") else "TEXT"
                     self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {col_type} DEFAULT '{default}'")
                 except sqlite3.OperationalError:
                     pass
@@ -196,6 +196,16 @@ class CheckpointManager:
             row = cur.fetchone()
             return self._row_to_dict(cur, row) if row else None
 
+    def find_any_tasks_by_hash(self, video_hash: str) -> List[Dict[str, Any]]:
+        """同一源视频的全部任务（不区分状态）。"""
+        if not video_hash:
+            return []
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM tasks WHERE video_hash = ? ORDER BY created_at DESC",
+                (video_hash,))
+            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
+
     def find_tasks_by_filename(self, filename: str) -> List[Dict[str, Any]]:
         """按原始文件名找候选任务（上传前快速去重时逐个比对大小与快速指纹）。"""
         with self._lock:
@@ -204,13 +214,22 @@ class CheckpointManager:
                 (filename,))
             return [self._row_to_dict(cur, row) for row in cur.fetchall()]
 
+    def find_tasks_by_size(self, size: int) -> List[Dict[str, Any]]:
+        """按文件字节数找候选任务（文件被改名后仍能命中上传前去重）。"""
+        if not size or size <= 0:
+            return []
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM tasks WHERE file_size = ? ORDER BY created_at DESC", (int(size),))
+            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
+
     def update_task(self, task_id: str, **kwargs) -> None:
         if not kwargs:
             return
         allowed = {"video_hash", "original_filename", "video_path", "language", "note_style",
                     "status", "stage", "progress", "created_at", "updated_at", "completed_at",
                     "note_path", "error", "error_kind", "processing_overrides", "total_tokens",
-                    "platform", "video_url", "model_name", "quick_hash"}
+                    "platform", "video_url", "model_name", "quick_hash", "file_size"}
         safe = {}
         for k, v in kwargs.items():
             if k not in allowed:

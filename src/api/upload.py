@@ -88,8 +88,8 @@ async def finalize_upload(filename: str, file_hash: str, file_path,
     # 记录快速指纹，下次同文件上传前就能直接判定「服务器已有」，无需再传
     try:
         quick = await asyncio.to_thread(quick_hash_file, str(file_path))
-        if quick:
-            engine.checkpoint.update_task(task.id, quick_hash=quick)
+        file_size = Path(file_path).stat().st_size
+        engine.checkpoint.update_task(task.id, quick_hash=quick or "", file_size=file_size)
     except Exception as exc:
         logger.warning("quick_hash failed for %s: %s", file_path, exc)
 
@@ -173,6 +173,12 @@ async def precheck_upload(req: PrecheckRequest):
 
     engine = get_engine()
     candidates = engine.checkpoint.find_tasks_by_filename(req.filename)
+    # 文件被改名的场景：再按字节数捞一遍候选，靠快速指纹确认
+    seen_ids = {c["id"] for c in candidates}
+    for c in engine.checkpoint.find_tasks_by_size(req.size):
+        if c["id"] not in seen_ids:
+            candidates.append(c)
+            seen_ids.add(c["id"])
 
     for cand in candidates:
         video_path = cand.get("video_path")
@@ -189,12 +195,12 @@ async def precheck_upload(req: PrecheckRequest):
         if not stored:
             stored = await asyncio.to_thread(quick_hash_file, video_path)
             if stored:
-                engine.checkpoint.update_task(cand["id"], quick_hash=stored)
+                engine.checkpoint.update_task(cand["id"], quick_hash=stored, file_size=req.size)
 
         # 任一侧拿不到指纹时退回「同名 + 同大小」判定
         if not req.quick_hash or not stored or stored == req.quick_hash:
             video_hash = cand.get("video_hash")
-            siblings = [c for c in candidates if c.get("video_hash") == video_hash]
+            siblings = [c for c in engine.checkpoint.find_any_tasks_by_hash(video_hash)] or [cand]
             return {
                 "found": True,
                 "video_hash": video_hash,
