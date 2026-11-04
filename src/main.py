@@ -91,6 +91,8 @@ app.add_middleware(
     allow_credentials=not _allow_any_origin,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 预检结果缓存 24 小时：切片上传几千次 POST，不缓存的话每次都要多一轮 OPTIONS
+    max_age=86400,
 )
 
 app.include_router(auth_router)
