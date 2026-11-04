@@ -126,7 +126,9 @@ async def get_note_content(task_id: str):
         content = Path(task["note_path"]).read_text(encoding="utf-8")
     else:
         raise HTTPException(404, "Note not found or not yet generated")
-    return {"task_id": task_id, "filename": task["original_filename"], "content": content}
+    return {"task_id": task_id, "filename": task["original_filename"], "content": content,
+            "language": task.get("language") or "zh",
+            "note_style": task.get("note_style") or "standard"}
 
 
 @router.get("/api/note/{task_id}/versions", tags=["notes"])

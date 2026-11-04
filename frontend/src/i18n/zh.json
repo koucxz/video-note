@@ -127,7 +127,14 @@
     "selectPolishStyle": "选择润色风格",
     "extraInstructions": "额外要求（可选）",
     "search": "搜索...",
-    "noNote": "笔记未找到"
+    "noNote": "笔记未找到",
+    "regenerate": "重新生成",
+    "regenTitle": "换语言或风格重新生成",
+    "regenHint": "复用服务器上已存好的源视频重新分析，不需要再次上传文件。",
+    "regenStart": "开始生成",
+    "regenStarted": "已开始生成{{lang}}版本，正在后台处理",
+    "regenExists": "已经存在{{lang}}版本，为你打开该笔记",
+    "regenFailed": "重新生成失败"
   },
   "noteStyle": {
     "standard": "标准笔记",

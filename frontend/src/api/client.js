@@ -214,6 +214,9 @@ export const uploadVideo = async (file, onProgress, language = 'zh', noteStyle =
 // ── Task ──
 export const getTaskStatus = async (taskId) => { return (await api.get('/task/' + taskId + '/status')).data; };
 export const retryTask = async (taskId) => { return (await api.post('/task/' + taskId + '/retry')).data; };
+export const regenerateTask = async (taskId, { language, note_style } = {}) => {
+  return (await api.post('/task/' + taskId + '/regenerate', { language, note_style })).data;
+};
 export const cancelTask = async (taskId) => { return (await api.post('/task/' + taskId + '/cancel')).data; };
 export const deleteTask = async (taskId) => { return (await api.delete('/task/' + taskId)).data; };
 export const deleteTasks = async (taskIds) => { return (await api.post('/tasks/batch-delete', { task_ids: taskIds })).data; };

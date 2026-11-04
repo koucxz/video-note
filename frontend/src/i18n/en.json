@@ -127,7 +127,14 @@
     "selectPolishStyle": "Select polish style",
     "extraInstructions": "Extra instructions (optional)",
     "search": "Search...",
-    "noNote": "Note not found"
+    "noNote": "Note not found",
+    "regenerate": "Regenerate",
+    "regenTitle": "Regenerate in another language or style",
+    "regenHint": "Reuses the source video already stored on the server - no re-upload needed.",
+    "regenStart": "Start",
+    "regenStarted": "Started generating the {{lang}} version",
+    "regenExists": "The {{lang}} version already exists - opening it",
+    "regenFailed": "Regeneration failed"
   },
   "noteStyle": {
     "standard": "Standard Notes",

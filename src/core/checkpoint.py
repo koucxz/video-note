@@ -170,6 +170,20 @@ class CheckpointManager:
             row = cur.fetchone()
             return self._row_to_dict(cur, row) if row else None
 
+    def other_task_ids_by_hash(self, video_hash: str, exclude_id: str) -> List[str]:
+        """同源视频的其它任务（不看状态）。
+
+        删除任务时用它判断源视频是否还被别的任务引用：换语言/风格重新生成会产生
+        多个任务共用同一个视频文件，只删一个任务不能把文件删掉。
+        """
+        if not video_hash:
+            return []
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT id FROM tasks WHERE video_hash = ? AND id <> ?",
+                (video_hash, exclude_id))
+            return [row[0] for row in cur.fetchall()]
+
     def update_task(self, task_id: str, **kwargs) -> None:
         if not kwargs:
             return
