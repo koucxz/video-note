@@ -2,6 +2,10 @@
 
 Convert videos into structured notes using cloud AI (no local models needed).
 
+## Demo
+
+![VideoNote workflow: choose a note style, generate notes, and review flashcards and answers](screenshots/videonote-workflow.gif)
+
 ## Features
 
 - **No Local AI Models**: Uses cloud APIs exclusively (LLM + VLM). No GPU, no Whisper dependency.
