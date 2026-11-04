@@ -81,13 +81,15 @@ export default function UploadPage() {
   const [noteStyle, setNoteStyle] = useState('standard')
   const [styleOpen, setStyleOpen] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [processingOptions, setProcessingOptions] = useState({ max_concurrent_tasks: 2, keyframe_interval: 30, segment_duration: 300, subtitle_only: false })
+  const [processingOptions, setProcessingOptions] = useState({ keyframe_interval: 30, segment_duration: 300, subtitle_only: false })
   const [uploading, setUploading] = useState(false)
   const [uploadPct, setUploadPct] = useState({})   // index -> { percent, loaded, total, speed, eta, phase }
   const [curIdx, setCurIdx] = useState(-1)
   const [over, setOver] = useState(false)
   const [history, setHistory] = useState([])
   const [results, setResults] = useState([])
+  const [retryingId, setRetryingId] = useState(null)
+  const [notice, setNotice] = useState(null)   // { type: 'ok' | 'err', text }
   const ref = useRef(null)
   const styleRef = useRef(null)
   const wsUpdates = useGlobalWebSocket()
@@ -102,8 +104,15 @@ export default function UploadPage() {
   }, [noteStyles, noteStyle])
 
   /* 加载历史 */
-  const loadHistory = () => { getHistoryAll().then(setHistory).catch(() => {}) }
+  const loadHistory = () => getHistoryAll().then(h => { setHistory(h); return h }).catch(() => {})
   useEffect(() => { loadHistory() }, [])
+
+  /* 操作提示自动消失 */
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), notice.type === 'err' ? 8000 : 4000)
+    return () => clearTimeout(timer)
+  }, [notice])
 
   /* WebSocket 实时更新 */
   useEffect(() => {
@@ -116,6 +125,13 @@ export default function UploadPage() {
   useEffect(() => {
     if (results.some(r => r.status === 'completed' || r.status === 'failed')) loadHistory()
   }, [results])
+
+  /* 历史里有排队中/处理中的任务时，定时刷新以反映进度 */
+  useEffect(() => {
+    if (!history.some(h => h.status !== 'completed' && h.status !== 'failed')) return
+    const timer = setInterval(() => { loadHistory() }, 3000)
+    return () => clearInterval(timer)
+  }, [history])
 
   /* 轮询未完成任务 */
   useEffect(() => {
@@ -182,7 +198,19 @@ export default function UploadPage() {
 
   const handleRetry = async (e, taskId) => {
     e.stopPropagation()
-    try { await retryTask(taskId) } catch { alert(t('common.retryFailed')) }
+    if (retryingId) return
+    setRetryingId(taskId)
+    setNotice(null)
+    try {
+      await retryTask(taskId)
+      await loadHistory()
+      setNotice({ type: 'ok', text: t('upload.retryStarted') })
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || ''
+      setNotice({ type: 'err', text: detail ? `${t('common.retryFailed')}：${detail}` : t('common.retryFailed') })
+    } finally {
+      setRetryingId(null)
+    }
   }
 
   /* 统计 */
@@ -264,7 +292,7 @@ export default function UploadPage() {
                     <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', styleOpen && 'rotate-180')} />
                   </button>
                   {styleOpen && (
-                    <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border bg-popover shadow-md">
+                    <div className="absolute z-50 mt-1 max-h-[22rem] w-full overflow-y-auto rounded-md border bg-popover shadow-md">
                       {noteStyles.map(id => {
                         const Icon = STYLE_META[id]?.icon || BookOpen
                         const active = noteStyle === id
@@ -274,13 +302,18 @@ export default function UploadPage() {
                             type="button"
                             onClick={() => { setNoteStyle(id); setStyleOpen(false) }}
                             className={cn(
-                              'flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent',
-                              active && 'bg-accent font-medium'
+                              'flex w-full items-start gap-2 px-3 py-2.5 text-sm transition-colors hover:bg-accent',
+                              active && 'bg-accent'
                             )}
                           >
-                            <Icon className={cn('h-4 w-4', STYLE_META[id]?.color)} />
-                            <span className="flex-1 text-left">{t('noteStyle.' + id)}</span>
-                            {active && <Check className="h-4 w-4 text-primary" />}
+                            <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', STYLE_META[id]?.color)} />
+                            <span className="min-w-0 flex-1 text-left">
+                              <span className={cn('block', active && 'font-medium')}>{t('noteStyle.' + id)}</span>
+                              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                                {t('noteStyle.' + id + 'Desc')}
+                              </span>
+                            </span>
+                            {active && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
                           </button>
                         )
                       })}
@@ -307,7 +340,7 @@ export default function UploadPage() {
                     {t('upload.advancedOptions')}
                     {!showAdvanced && (
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                        {t('upload.concurrency')}: {processingOptions.max_concurrent_tasks} · {t('upload.kfShort')}: {processingOptions.keyframe_interval}s
+                        {t('upload.kfShort')}: {processingOptions.keyframe_interval}s
                       </span>
                     )}
                   </span>
@@ -317,31 +350,6 @@ export default function UploadPage() {
                 {showAdvanced && (
                   <Card className="border-muted">
                     <CardContent className="space-y-4 p-4">
-
-                      {/* 并发数 */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold">{t('upload.maxConcurrent')}</Label>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">{processingOptions.max_concurrent_tasks} {t('common.tasks')}</span>
-                            <Input
-                              type="number" min={1} max={5}
-                              value={processingOptions.max_concurrent_tasks}
-                              onChange={e => setProcessingOptions(p => ({ ...p, max_concurrent_tasks: Math.max(1, Math.min(5, Number(e.target.value) || 1)) }))}
-                              className="h-7 w-16 text-center text-xs"
-                            />
-                          </div>
-                        </div>
-                        <input
-                          type="range" min={1} max={5} step={1}
-                          value={processingOptions.max_concurrent_tasks}
-                          onChange={e => setProcessingOptions(p => ({ ...p, max_concurrent_tasks: Number(e.target.value) }))}
-                          className="w-full accent-primary"
-                        />
-                        <p className="text-[11px] text-muted-foreground">{t('upload.maxConcurrentDesc')}</p>
-                      </div>
-
-                      <Separator />
 
                       {/* 关键帧间隔 */}
                       <div className="space-y-1.5">
@@ -532,6 +540,22 @@ export default function UploadPage() {
               )}
             </CardHeader>
             <CardContent className="flex-1 overflow-hidden pt-0">
+              {notice && (
+                <div className={cn(
+                  'mb-2 flex items-start gap-2 rounded-md border px-3 py-2 text-xs',
+                  notice.type === 'err'
+                    ? 'border-destructive/30 bg-destructive/5 text-destructive'
+                    : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600'
+                )}>
+                  {notice.type === 'err'
+                    ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    : <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                  <span className="min-w-0 flex-1 break-words leading-relaxed">{notice.text}</span>
+                  <button type="button" onClick={() => setNotice(null)} className="shrink-0 opacity-60 transition-opacity hover:opacity-100">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
               {history.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <FileText className="mb-2 h-8 w-8 opacity-40" />
@@ -559,15 +583,32 @@ export default function UploadPage() {
                           <p className="truncate text-sm font-medium">{item.videoName}</p>
                           <p className="text-[11px] text-muted-foreground">{relativeTime(item.createdAt, t)}</p>
                         </div>
-                        <StatusBadge status={item.status} t={t} />
+                        {item.status === 'failed' && item.error ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="shrink-0"><StatusBadge status={item.status} t={t} /></span>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="max-w-xs whitespace-pre-wrap break-words text-xs">
+                              {item.error}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <StatusBadge status={item.status} t={t} />
+                        )}
                         {item.status === 'failed' && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => handleRetry(e, item.task_id)}>
-                                <RefreshCw className="h-3.5 w-3.5" />
+                              <Button
+                                variant="ghost" size="icon" className="h-7 w-7 shrink-0"
+                                disabled={!!retryingId}
+                                onClick={e => handleRetry(e, item.task_id)}
+                              >
+                                <RefreshCw className={cn('h-3.5 w-3.5', retryingId === item.task_id && 'animate-spin')} />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>{t('common.retry')}</TooltipContent>
+                            <TooltipContent>
+                              {retryingId === item.task_id ? t('upload.retrying') : t('common.retry')}
+                            </TooltipContent>
                           </Tooltip>
                         )}
                       </div>

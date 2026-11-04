@@ -79,7 +79,9 @@
     "remaining": "剩余",
     "merging": "合并分片中…",
     "uploadFailed": "上传失败",
-    "resumedHint": "已从断点续传"
+    "resumedHint": "已从断点续传",
+    "retrying": "正在重试…",
+    "retryStarted": "已重新提交处理，稍后可在右侧看到进度"
   },
   "history": {
     "title": "记录",

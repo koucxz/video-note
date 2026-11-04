@@ -79,7 +79,9 @@
     "remaining": "left",
     "merging": "Merging chunks…",
     "uploadFailed": "Upload failed",
-    "resumedHint": "Resumed from"
+    "resumedHint": "Resumed from",
+    "retrying": "Retrying…",
+    "retryStarted": "Reprocessing started — progress will show on the right"
   },
   "history": {
     "title": "History",
