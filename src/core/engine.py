@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _PARAM_BOUNDS = {
     "keyframe_interval": (10, 120),
     "segment_duration": (60, 1800),
-    "max_concurrent_tasks": (1, 6),
+    "max_concurrent_tasks": (1, 3),
 }
 
 

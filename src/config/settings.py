@@ -117,7 +117,7 @@ class ProcessingConfig:
     keyframe_interval: int = 30
     max_retries: int = 3
     retry_delay: float = 2.0
-    max_concurrent_tasks: int = 6
+    max_concurrent_tasks: int = 3
 
 
 @dataclass
@@ -287,7 +287,8 @@ class AppConfig:
         max_conc = os.getenv("MAX_CONCURRENT_TASKS")
         if max_conc:
             try:
-                config.processing.max_concurrent_tasks = max(1, int(max_conc))
+                # 硬上限 3：2G 小机器上单个抽帧峰值约 600MB，超过 3 路并发有 OOM 风险
+                config.processing.max_concurrent_tasks = max(1, min(3, int(max_conc)))
             except ValueError:
                 pass
 
