@@ -8,6 +8,7 @@ import {
 import { uploadVideo, getHistoryAll, getTaskStatus, retryTask, computeQuickHash, precheckUpload, reuseUpload } from '../api/client'
 import { useGlobalWebSocket } from '../hooks/useWebSocket'
 import { useNoteStyles } from '../hooks/useNoteStyles'
+import { OverflowTooltip } from '../components/OverflowTooltip'
 import { useLang } from '../context/LangContext'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
@@ -495,7 +496,7 @@ export default function UploadPage() {
                         <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 transition-colors">
                           <FileVideo className="h-4 w-4 shrink-0 text-primary" />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{f.name}</p>
+                            <OverflowTooltip as="p" className="truncate text-sm font-medium" text={f.name} />
                             <div className="mt-0.5 flex flex-wrap items-center gap-2">
                               <span className="text-[11px] text-muted-foreground">{fmtSize(f.size)}</span>
                               {r?.task_id && <StatusBadge status={r.status} t={t} />}
@@ -626,7 +627,7 @@ export default function UploadPage() {
                           <Icon className={cn('h-4 w-4', cfg.color, item.status === 'processing' && 'animate-spin')} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">{item.videoName}</p>
+                          <OverflowTooltip as="p" className="truncate text-sm font-medium" text={item.videoName} />
                           <p className="text-[11px] text-muted-foreground">{relativeTime(item.createdAt, t)}</p>
                         </div>
                         {item.status === 'failed' && item.error ? (

@@ -28,6 +28,7 @@ import { Label } from "../components/ui/label"
 import { Separator } from "../components/ui/separator"
 import { Skeleton } from "../components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
+import { OverflowTooltip } from "../components/OverflowTooltip"
 import {
   Select,
   SelectContent,
@@ -631,9 +632,7 @@ function SettingsPage() {
                             )}
                           </button>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">
-                              {file.filename}
-                            </p>
+                            <OverflowTooltip as="p" className="truncate text-sm font-medium" text={file.filename} />
                             <p className="break-all font-mono text-xs text-muted-foreground">
                               {file.path}
                             </p>
@@ -713,7 +712,7 @@ function SettingsPage() {
                               <p className="font-medium">{p.name}</p>
                               <p className="text-xs text-muted-foreground">{p.type} \u2022 {p.model || "default"}</p>
                               {p.api_key_masked && <p className="mt-1 font-mono text-xs text-muted-foreground">{p.api_key_masked}</p>}
-                              {p.base_url && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{p.base_url}</p>}
+                              {p.base_url && <OverflowTooltip as="p" className="max-w-[200px] truncate text-xs text-muted-foreground" text={p.base_url} />}
                             </div>
                             <div className="flex gap-1">
                               {p.is_active ? (

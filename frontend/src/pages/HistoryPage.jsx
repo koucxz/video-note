@@ -16,6 +16,7 @@ import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu"
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "../components/ui/tooltip"
+import { OverflowTooltip } from "../components/OverflowTooltip"
 import { cn } from "../lib/utils"
 
 const statusConfig = {
@@ -182,8 +183,12 @@ function HistoryPage() {
                             <Icon className={cn("h-4 w-4", sc.color, item.status === "processing" && "animate-spin")} />
                           </div>
                           <div className="min-w-0">
-                            <p className="truncate font-medium">{item.videoName}</p>
-                            {item.video_url && <p className="truncate text-xs text-muted-foreground"><ExternalLink className="mr-1 inline h-3 w-3" />{item.video_url}</p>}
+                            <OverflowTooltip as="p" className="truncate font-medium" text={item.videoName} />
+                            {item.video_url && (
+                              <OverflowTooltip as="p" className="truncate text-xs text-muted-foreground" text={item.video_url}>
+                                <ExternalLink className="mr-1 inline h-3 w-3" />{item.video_url}
+                              </OverflowTooltip>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -199,7 +204,10 @@ function HistoryPage() {
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {canView && (<><DropdownMenuItem onClick={() => downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md")}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem><DropdownMenuItem onClick={() => downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf")}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem></>)}
+                              {canView && (<>
+                                <DropdownMenuItem onClick={e => { e.stopPropagation(); downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md") }}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem>
+                                <DropdownMenuItem onClick={e => { e.stopPropagation(); downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf") }}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem>
+                              </>)}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => handleDelete(e, item.task_id)}><Trash2 className="mr-2 h-4 w-4" />{t('common.delete')}</DropdownMenuItem>
                             </DropdownMenuContent>

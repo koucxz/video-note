@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
+import { OverflowTooltip } from "../components/OverflowTooltip"
 import { cn } from "../lib/utils"
 
 export default function RAGPage() {
@@ -90,7 +91,7 @@ export default function RAGPage() {
               <label key={item.task_id} className={cn("flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors", selectedNotes.has(item.task_id) ? "bg-primary/10" : "hover:bg-muted")}>
                 <input type="checkbox" checked={selectedNotes.has(item.task_id)} onChange={() => toggleNote(item.task_id)} className="h-3.5 w-3.5 rounded accent-primary" />
                 <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{item.videoName}</span>
+                <OverflowTooltip className="truncate" text={item.videoName} />
               </label>
             ))}
           </div>

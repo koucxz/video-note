@@ -11,6 +11,7 @@ import { useNoteStore } from "../stores/noteStore"
 import { useNoteStyles } from "../hooks/useNoteStyles"
 import { useLang } from "../context/LangContext"
 import { useToast } from "../context/ToastContext"
+import { OverflowTooltip } from "../components/OverflowTooltip"
 
 import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
@@ -142,7 +143,7 @@ function NotePage() {
                   className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
                     item.task_id === taskId ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted")}>
                   <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", item.task_id === taskId ? "text-primary" : "text-emerald-500")} />
-                  <span className="truncate">{item.videoName}</span>
+                  <OverflowTooltip className="truncate" text={item.videoName} />
                 </button>
               ))}
             </div>
