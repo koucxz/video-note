@@ -149,11 +149,24 @@ class CheckpointManager:
                 "pages": (total + size - 1) // size if size > 0 else 0,
             }
 
-    def find_task_by_hash(self, video_hash: str) -> Optional[Dict[str, Any]]:
+    def find_task_by_hash(self, video_hash: str, language: Optional[str] = None,
+                          note_style: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """按视频 hash 查已完成任务。
+
+        language / note_style 为「精确匹配」条件：只有同语言同风格的任务才算命中，
+        否则同一个视频换个语言重传会错误地拿到上一份笔记。
+        """
+        sql = "SELECT * FROM tasks WHERE video_hash = ? AND status = 'completed'"
+        params: list = [video_hash]
+        if language:
+            sql += " AND language = ?"
+            params.append(language)
+        if note_style:
+            sql += " AND note_style = ?"
+            params.append(note_style)
+        sql += " ORDER BY completed_at DESC LIMIT 1"
         with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE video_hash = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1",
-                (video_hash,))
+            cur = self.conn.execute(sql, tuple(params))
             row = cur.fetchone()
             return self._row_to_dict(cur, row) if row else None
 

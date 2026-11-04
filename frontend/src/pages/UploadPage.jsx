@@ -171,7 +171,10 @@ export default function UploadPage() {
     setUploading(true)
     setResults([])
     setUploadPct({})
+    setNotice(null)
     const out = []
+    let reusedSameNote = 0
+    let reusedVideoFile = 0
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       setCurIdx(i)
@@ -181,8 +184,13 @@ export default function UploadPage() {
           (info) => setUploadPct((p) => ({ ...p, [i]: info })),
           lang, noteStyle, processingOptions,
         )
-        if (res.already_completed) out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 })
-        else out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 })
+        if (res.already_completed) {
+          reusedSameNote += 1
+          out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 })
+        } else {
+          if (res.reused_video) reusedVideoFile += 1
+          out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 })
+        }
       } catch (e) {
         const msg = e?.response?.data?.detail || e?.message || t('upload.uploadFailed')
         out.push({ fileName: f.name, fileSize: f.size, error: msg, status: 'failed', progress: 0 })
@@ -192,6 +200,8 @@ export default function UploadPage() {
     setUploading(false)
     setCurIdx(-1)
     setUploadPct({})
+    if (reusedSameNote) setNotice({ type: 'ok', text: t('upload.sameNoteReused') })
+    else if (reusedVideoFile) setNotice({ type: 'ok', text: t('upload.reusedVideo') })
     // 刷新历史列表
     loadHistory()
   }

@@ -52,17 +52,24 @@ async def finalize_upload(filename: str, file_hash: str, file_path,
     """文件已落盘后的公共收尾：去重命中 / 时长校验 / 建任务 / 起处理协程。"""
     engine = get_engine()
 
-    existing = engine.checkpoint.find_task_by_hash(file_hash)
+    # 只有「同视频 + 同语言 + 同风格」才算已完成，可直接复用；
+    # 换语言/换风格必须重新生成，否则会拿到上一份语言的笔记。
+    existing = engine.checkpoint.find_task_by_hash(
+        file_hash, language=language, note_style=note_style)
     if existing:
         return {
             "task_id": existing["id"],
             "filename": filename,
             "is_new_upload": False,
             "already_completed": True,
+            "reused_video": True,
             "language": language,
             "note_style": note_style,
-            "message": "File already processed - returning existing note",
+            "message": "Same video already processed in this language and style - returning existing note",
         }
+
+    # 文件已在服务器上（同 hash）但语言/风格不同：不重复上传，直接按新参数重跑
+    reused_video = not is_new
 
     duration = await get_video_duration(str(file_path))
     duration_warning = None
@@ -85,6 +92,7 @@ async def finalize_upload(filename: str, file_hash: str, file_path,
         "task_id": task.id,
         "filename": filename,
         "is_new_upload": is_new,
+        "reused_video": reused_video,
         "language": language,
         "note_style": note_style,
         "processing_overrides": overrides,

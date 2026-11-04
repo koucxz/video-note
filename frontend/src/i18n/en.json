@@ -81,7 +81,9 @@
     "uploadFailed": "Upload failed",
     "resumedHint": "Resumed from",
     "retrying": "Retrying…",
-    "retryStarted": "Reprocessing started — progress will show on the right"
+    "retryStarted": "Reprocessing started — progress will show on the right",
+    "reusedVideo": "Same video is already on the server — regenerating in the selected language and style without re-uploading",
+    "sameNoteReused": "This video was already processed in the same language and style — showing the existing note. Change language or style to regenerate."
   },
   "history": {
     "title": "History",
