@@ -48,3 +48,16 @@ async def get_video_duration(video_path: str) -> float:
     except Exception as exc:
         logger.warning("get_video_duration error: %s (%s)", exc, type(exc).__name__)
         return 0.0
+
+
+async def timeout_for_video(video_path: str, factor: float = 1.5,
+                            minimum: int = 600, maximum: int = 3600) -> int:
+    """按视频时长估算 ffmpeg 超时。
+
+    默认的 300s 对长视频不够：1.5GB / 52 分钟的 webm 抽帧就要 6 分钟以上，
+    到 91 帧时被 TimeoutExpired 打断，整条处理链失败。
+    """
+    duration = await get_video_duration(video_path)
+    if not duration:
+        return minimum
+    return max(minimum, min(maximum, int(duration * factor)))

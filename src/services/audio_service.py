@@ -2,7 +2,7 @@
 import logging
 import aiofiles
 from pathlib import Path
-from ..utils.video_utils import run_ffmpeg
+from ..utils.video_utils import run_ffmpeg, timeout_for_video
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class AudioService:
         ]
 
         try:
-            proc = await run_ffmpeg(cmd)
+            proc = await run_ffmpeg(cmd, timeout=await timeout_for_video(video_path))
             if proc.returncode != 0:
                 raise RuntimeError(f"音频提取失败: {proc.stderr.decode('utf-8', errors='replace')[-500:]}")
         except RuntimeError:

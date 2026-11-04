@@ -3,7 +3,7 @@ import logging
 import aiofiles
 from pathlib import Path
 from typing import List
-from ..utils.video_utils import run_ffmpeg
+from ..utils.video_utils import run_ffmpeg, get_video_duration, timeout_for_video
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,21 @@ class VideoService:
         output_dir = self.frames_dir / video_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        interval = max(1, int(interval))
+        duration = await get_video_duration(video_path)
+        expected = max(1, int(duration // interval)) if duration else 0
+
         existing_frames = sorted(output_dir.glob("frame_*.jpg"))
         if existing_frames:
-            logger.info(f"帧已存在: {len(existing_frames)} 个")
-            return [str(f) for f in existing_frames]
+            # 只有数量接近预期才复用；否则说明上次抽帧被中断，残帧要重来
+            if not expected or len(existing_frames) >= expected * 0.9:
+                logger.info(f"帧已存在: {len(existing_frames)} 个")
+                return [str(f) for f in existing_frames]
+            logger.warning("已有帧不完整(%d/%d)，重新提取", len(existing_frames), expected)
+            for f in existing_frames:
+                f.unlink(missing_ok=True)
 
-        logger.info(f"提取关键帧: 间隔 {interval}s")
+        logger.info(f"提取关键帧: 间隔 {interval}s, 预计 {expected} 帧")
         # Use forward slashes for ffmpeg compatibility
         output_pattern = str(output_dir / "frame_%04d.jpg").replace("\\", "/")
         video_input = str(video_path).replace("\\", "/")
@@ -76,18 +85,29 @@ class VideoService:
         ]
 
         try:
-            proc = await run_ffmpeg(cmd)
+            proc = await run_ffmpeg(cmd, timeout=await timeout_for_video(video_path))
             if proc.returncode != 0:
                 stderr_text = proc.stderr.decode("utf-8", errors="replace")
                 raise RuntimeError(f"关键帧提取失败: {stderr_text[-500:]}")
         except RuntimeError:
+            self._discard_frames(output_dir)
             raise
         except Exception as e:
+            self._discard_frames(output_dir)
             raise RuntimeError(f"关键帧提取异常: {type(e).__name__}: {e}")
 
         frames = sorted(output_dir.glob("frame_*.jpg"))
         logger.info(f"关键帧提取完成: {len(frames)} 个")
         return [str(f) for f in frames]
+
+    @staticmethod
+    def _discard_frames(output_dir: Path) -> None:
+        """抽帧失败时清掉半成品，避免下次被误判为已完成。"""
+        for f in output_dir.glob("frame_*.jpg"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
     
     async def get_video_info(self, video_path: str) -> dict:
         import json
