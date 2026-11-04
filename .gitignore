@@ -31,3 +31,4 @@ start-backend.ps1
 
 tools/
 .vercel
+.env*
