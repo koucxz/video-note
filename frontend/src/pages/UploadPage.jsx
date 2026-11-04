@@ -5,7 +5,7 @@ import {
   Clock, FileText, ChevronDown, BookOpen, Zap, ListChecks, GraduationCap,
   Sparkles, RefreshCw, TrendingUp, AlertTriangle, BarChart3, Settings,
 } from 'lucide-react'
-import { uploadVideo, getHistoryAll, getTaskStatus, retryTask } from '../api/client'
+import { uploadVideo, getHistoryAll, getTaskStatus, retryTask, computeQuickHash, precheckUpload, reuseUpload } from '../api/client'
 import { useGlobalWebSocket } from '../hooks/useWebSocket'
 import { useNoteStyles } from '../hooks/useNoteStyles'
 import { useLang } from '../context/LangContext'
@@ -175,15 +175,41 @@ export default function UploadPage() {
     const out = []
     let reusedSameNote = 0
     let reusedVideoFile = 0
+    let skippedUpload = 0
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       setCurIdx(i)
+
+      // ① 上传前先问服务器「这个视频是不是已经有了」，有就不传了
+      let res = null
       try {
-        const res = await uploadVideo(
-          f,
-          (info) => setUploadPct((p) => ({ ...p, [i]: info })),
-          lang, noteStyle, processingOptions,
-        )
+        setUploadPct((p) => ({ ...p, [i]: { phase: 'checking', percent: 0 } }))
+        const quickHash = await computeQuickHash(f)
+        const pre = await precheckUpload(f.name, f.size, quickHash)
+        if (pre?.found && pre.video_hash) {
+          setUploadPct((p) => ({ ...p, [i]: { phase: 'reusing', percent: 100 } }))
+          res = await reuseUpload({
+            videoHash: pre.video_hash,
+            filename: f.name,
+            language: lang,
+            noteStyle,
+            processingOptions,
+          })
+          skippedUpload += 1
+        }
+      } catch {
+        res = null   // 预检失败不阻塞，退回正常上传
+      }
+      if (skippedUpload && res) setUploadPct((p) => { const n = { ...p }; delete n[i]; return n })
+
+      try {
+        if (!res) {
+          res = await uploadVideo(
+            f,
+            (info) => setUploadPct((p) => ({ ...p, [i]: info })),
+            lang, noteStyle, processingOptions,
+          )
+        }
         if (res.already_completed) {
           reusedSameNote += 1
           out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 })
@@ -201,6 +227,7 @@ export default function UploadPage() {
     setCurIdx(-1)
     setUploadPct({})
     if (reusedSameNote) setNotice({ type: 'ok', text: t('upload.sameNoteReused') })
+    else if (skippedUpload) setNotice({ type: 'ok', text: t('upload.skippedUpload') })
     else if (reusedVideoFile) setNotice({ type: 'ok', text: t('upload.reusedVideo') })
     // 刷新历史列表
     loadHistory()
@@ -478,31 +505,35 @@ export default function UploadPage() {
                               {r?.error && <span className="text-[11px] text-destructive">{r.error}</span>}
                             </div>
                             {/* 上传中：真实字节进度 + 速率 + 剩余时间 */}
-                            {uploading && uploadPct[i] && (
-                              <div className="mt-1.5 space-y-1">
-                                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                                  <div
-                                    className={cn(
-                                      'h-full rounded-full bg-primary transition-[width] duration-200 ease-out',
-                                      uploadPct[i].phase === 'merging' && 'animate-pulse'
+                            {uploading && uploadPct[i] && (() => {
+                              const info = uploadPct[i]
+                              const busy = info.phase === 'merging' || info.phase === 'checking' || info.phase === 'reusing'
+                              const label = info.phase === 'merging' ? t('upload.merging')
+                                : info.phase === 'checking' ? t('upload.checking')
+                                : info.phase === 'reusing' ? t('upload.reusing')
+                                : `${(info.percent || 0).toFixed(1)}% · ${fmtSize(info.loaded)} / ${fmtSize(info.total)}`
+                              return (
+                                <div className="mt-1.5 space-y-1">
+                                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                                    <div
+                                      className={cn(
+                                        'h-full rounded-full bg-primary transition-[width] duration-200 ease-out',
+                                        busy && 'animate-pulse'
+                                      )}
+                                      style={{ width: `${Math.max(1.5, Math.min(100, info.percent || 0))}%` }}
+                                    />
+                                  </div>
+                                  <div className="flex items-center justify-between gap-2 text-[11px] tabular-nums text-muted-foreground">
+                                    <span>{label}</span>
+                                    {!busy && (
+                                      <span>
+                                        {fmtSpeed(info.speed)} · {t('upload.remaining')} {fmtEta(info.eta)}
+                                      </span>
                                     )}
-                                    style={{ width: `${Math.max(1.5, Math.min(100, uploadPct[i].percent))}%` }}
-                                  />
+                                  </div>
                                 </div>
-                                <div className="flex items-center justify-between gap-2 text-[11px] tabular-nums text-muted-foreground">
-                                  <span>
-                                    {uploadPct[i].phase === 'merging'
-                                      ? t('upload.merging')
-                                      : `${uploadPct[i].percent.toFixed(1)}% · ${fmtSize(uploadPct[i].loaded)} / ${fmtSize(uploadPct[i].total)}`}
-                                  </span>
-                                  {uploadPct[i].phase !== 'merging' && (
-                                    <span>
-                                      {fmtSpeed(uploadPct[i].speed)} · {t('upload.remaining')} {fmtEta(uploadPct[i].eta)}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
+                              )
+                            })()}
                             {r?.task_id && r.status === 'processing' && (
                               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(r.progress || 0) * 100}%` }} />
@@ -529,7 +560,12 @@ export default function UploadPage() {
               {/* 提交按钮 */}
               <Button className="w-full" size="lg" onClick={go} disabled={!files.length || uploading || stylesLoading || !!stylesError || !selectedStyle}>
                 {uploading
-                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('upload.uploading')}{uploadPct[curIdx] && uploadPct[curIdx].phase !== 'merging' ? ` ${Math.round(uploadPct[curIdx].percent)}%` : ''}</>
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{(() => {
+                      const c = uploadPct[curIdx]
+                      if (c?.phase === 'checking') return t('upload.checking')
+                      if (c?.phase === 'reusing') return t('upload.reusing')
+                      return t('upload.uploading') + (c && c.phase !== 'merging' ? ` ${Math.round(c.percent || 0)}%` : '')
+                    })()}</>
                   : <><Upload className="mr-2 h-4 w-4" />{t('upload.startProcess')}{files.length > 0 && ` (${files.length})`}</>
                 }
               </Button>

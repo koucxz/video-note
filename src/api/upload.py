@@ -5,9 +5,10 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
 
 from ..core.engine import get_engine, _clamp_param
-from ..utils.video_utils import get_video_duration
+from ..utils.video_utils import get_video_duration, quick_hash_file
 from ..services.ai_service import DEFAULT_NOTE_STYLE, VALID_NOTE_STYLES
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,14 @@ async def finalize_upload(filename: str, file_hash: str, file_path,
         processing_overrides=overrides if overrides else None,
     )
 
+    # 记录快速指纹，下次同文件上传前就能直接判定「服务器已有」，无需再传
+    try:
+        quick = await asyncio.to_thread(quick_hash_file, str(file_path))
+        if quick:
+            engine.checkpoint.update_task(task.id, quick_hash=quick)
+    except Exception as exc:
+        logger.warning("quick_hash failed for %s: %s", file_path, exc)
+
     t = asyncio.create_task(_process_with_error_handling(engine, task.id, str(file_path)))
     engine._running_tasks.add(t)
     t.add_done_callback(engine._running_tasks.discard)
@@ -134,6 +143,97 @@ async def upload_video(
     except Exception as exc:
         logger.error("Upload failed: %s", exc)
         raise HTTPException(500, f"Upload failed: {exc}")
+
+
+class PrecheckRequest(BaseModel):
+    filename: str
+    size: int
+    quick_hash: str = ""
+
+
+class ReuseRequest(BaseModel):
+    video_hash: str
+    filename: str = ""
+    language: str = "zh"
+    note_style: str = DEFAULT_NOTE_STYLE
+    processing_options: str = "{}"
+
+
+@router.post("/api/upload/precheck", tags=["upload"],
+    summary="Check if the video is already on the server before uploading",
+    description="Client sends filename + size + a sampled quick hash. If a matching source video exists, the upload can be skipped entirely.")
+async def precheck_upload(req: PrecheckRequest):
+    if not req.filename:
+        raise HTTPException(400, "No file selected")
+    ext = Path(req.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported format: {ext}")
+    if req.size <= 0:
+        raise HTTPException(400, "Invalid file size")
+
+    engine = get_engine()
+    candidates = engine.checkpoint.find_tasks_by_filename(req.filename)
+
+    for cand in candidates:
+        video_path = cand.get("video_path")
+        if not video_path:
+            continue
+        path = Path(video_path)
+        try:
+            if not path.exists() or path.stat().st_size != req.size:
+                continue
+        except OSError:
+            continue
+
+        stored = cand.get("quick_hash") or ""
+        if not stored:
+            stored = await asyncio.to_thread(quick_hash_file, video_path)
+            if stored:
+                engine.checkpoint.update_task(cand["id"], quick_hash=stored)
+
+        # 任一侧拿不到指纹时退回「同名 + 同大小」判定
+        if not req.quick_hash or not stored or stored == req.quick_hash:
+            video_hash = cand.get("video_hash")
+            siblings = [c for c in candidates if c.get("video_hash") == video_hash]
+            return {
+                "found": True,
+                "video_hash": video_hash,
+                "filename": req.filename,
+                "size": req.size,
+                "tasks": [{
+                    "task_id": c["id"],
+                    "language": c.get("language") or "zh",
+                    "note_style": c.get("note_style") or DEFAULT_NOTE_STYLE,
+                    "status": c.get("status"),
+                } for c in siblings],
+            }
+
+    return {"found": False, "filename": req.filename, "size": req.size}
+
+
+@router.post("/api/upload/reuse", tags=["upload"],
+    summary="Start processing an existing source video without uploading",
+    description="Reuses a video already stored on the server (matched by precheck) and processes it with the requested language/style.")
+async def reuse_upload(req: ReuseRequest):
+    if not req.video_hash:
+        raise HTTPException(400, "video_hash is required")
+
+    engine = get_engine()
+    src = engine.checkpoint.find_any_task_by_hash(req.video_hash)
+    if not src:
+        raise HTTPException(404, "This video is not on the server")
+    video_path = src.get("video_path")
+    if not video_path or not Path(video_path).exists():
+        raise HTTPException(410, "Source video has been removed from the server")
+
+    filename = req.filename or src.get("original_filename") or "video"
+    _, language, note_style, overrides, _ = parse_upload_options(
+        filename, req.language, req.note_style, req.processing_options
+    )
+    logger.info("Reusing stored video %s for %s/%s", req.video_hash[:12], language, note_style)
+    return await finalize_upload(
+        filename, req.video_hash, video_path, False, language, note_style, overrides
+    )
 
 
 async def _process_with_error_handling(engine, task_id: str, video_path: str):

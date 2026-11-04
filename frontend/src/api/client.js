@@ -211,6 +211,52 @@ export const uploadVideo = async (file, onProgress, language = 'zh', noteStyle =
   return singleUpload(file, onProgress, language, noteStyle, processingOptions);
 };
 
+// ── 上传前去重 ──
+const QUICK_HASH_SLICE = 1024 * 1024
+
+/**
+ * 计算文件快速指纹：大小 + 首/中/尾各 1MB 的 SHA-256。
+ * 必须与后端 quick_hash_file 完全一致（切片偏移、拼接顺序都一样）。
+ */
+export const computeQuickHash = async (file) => {
+  const size = file.size
+  if (!size) return ''
+  const midStart = Math.floor(size / 2)
+  const tailStart = Math.max(0, size - QUICK_HASH_SLICE)
+  const parts = [
+    file.slice(0, Math.min(QUICK_HASH_SLICE, size)),
+    file.slice(midStart, midStart + Math.min(QUICK_HASH_SLICE, size - midStart)),
+    file.slice(tailStart, size),
+  ]
+  const buffers = await Promise.all(parts.map(p => p.arrayBuffer()))
+  const head = new TextEncoder().encode(`${size}:`)
+  const total = buffers.reduce((n, b) => n + b.byteLength, head.byteLength)
+  const merged = new Uint8Array(total)
+  merged.set(head, 0)
+  let off = head.byteLength
+  for (const b of buffers) {
+    merged.set(new Uint8Array(b), off)
+    off += b.byteLength
+  }
+  const digest = await crypto.subtle.digest('SHA-256', merged)
+  return Array.from(new Uint8Array(digest)).map(x => x.toString(16).padStart(2, '0')).join('')
+}
+
+export const precheckUpload = async (filename, size, quickHash) => {
+  return (await api.post('/upload/precheck', { filename, size, quick_hash: quickHash })).data
+}
+
+export const reuseUpload = async ({ videoHash, filename, language = 'zh', noteStyle = 'standard', processingOptions = {} }) => {
+  const res = await api.post('/upload/reuse', {
+    video_hash: videoHash,
+    filename,
+    language,
+    note_style: noteStyle,
+    processing_options: JSON.stringify(processingOptions || {}),
+  }, { timeout: 120000 })
+  return res.data
+}
+
 // ── Task ──
 export const getTaskStatus = async (taskId) => { return (await api.get('/task/' + taskId + '/status')).data; };
 export const retryTask = async (taskId) => { return (await api.post('/task/' + taskId + '/retry')).data; };

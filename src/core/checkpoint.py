@@ -69,7 +69,8 @@ class CheckpointManager:
                     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE)""")
             for col, default in [("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
                                   ("processing_overrides", "{}"), ("total_tokens", "0"),
-                                  ("platform", ""), ("video_url", ""), ("model_name", "")]:
+                                  ("platform", ""), ("video_url", ""), ("model_name", ""),
+                                  ("quick_hash", "")]:
                 try:
                     col_type = "TEXT" if col != "total_tokens" else "INTEGER"
                     self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {col_type} DEFAULT '{default}'")
@@ -184,13 +185,32 @@ class CheckpointManager:
                 (video_hash, exclude_id))
             return [row[0] for row in cur.fetchall()]
 
+    def find_any_task_by_hash(self, video_hash: str) -> Optional[Dict[str, Any]]:
+        """按视频 hash 找任意状态的最新任务（用于复用服务器上已有的源视频）。"""
+        if not video_hash:
+            return None
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM tasks WHERE video_hash = ? ORDER BY created_at DESC LIMIT 1",
+                (video_hash,))
+            row = cur.fetchone()
+            return self._row_to_dict(cur, row) if row else None
+
+    def find_tasks_by_filename(self, filename: str) -> List[Dict[str, Any]]:
+        """按原始文件名找候选任务（上传前快速去重时逐个比对大小与快速指纹）。"""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM tasks WHERE original_filename = ? ORDER BY created_at DESC",
+                (filename,))
+            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
+
     def update_task(self, task_id: str, **kwargs) -> None:
         if not kwargs:
             return
         allowed = {"video_hash", "original_filename", "video_path", "language", "note_style",
                     "status", "stage", "progress", "created_at", "updated_at", "completed_at",
                     "note_path", "error", "error_kind", "processing_overrides", "total_tokens",
-                    "platform", "video_url", "model_name"}
+                    "platform", "video_url", "model_name", "quick_hash"}
         safe = {}
         for k, v in kwargs.items():
             if k not in allowed:
