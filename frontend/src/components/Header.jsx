@@ -1,9 +1,12 @@
 import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
-import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, LogOut } from "lucide-react"
+import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, LogOut, Github } from "lucide-react"
 import { Button } from "./ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 import { clearAuthToken, getToken } from "../api/client"
+
+// 项目仓库地址：顶栏和页脚共用
+export const GITHUB_URL = "https://github.com/koucxz/video-note"
 
 function Header() {
   const location = useLocation()
@@ -50,6 +53,23 @@ function Header() {
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" asChild>
+                  <a
+                    href={GITHUB_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex shrink-0 items-center gap-2"
+                  >
+                    <Github className="h-4 w-4" />
+                    <span className="hidden sm:inline">GitHub</span>
+                  </a>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom"><p>{t('header.githubTip')}</p></TooltipContent>
+            </Tooltip>
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" onClick={toggleLang} className="inline-flex items-center gap-1">

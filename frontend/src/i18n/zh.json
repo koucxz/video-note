@@ -45,7 +45,8 @@
     "noteQA": "笔记问答",
     "settings": "设置",
     "switchLang": "EN",
-    "switchLangTip": "Switch to English"
+    "switchLangTip": "Switch to English",
+    "githubTip": "在 GitHub 上查看源码，欢迎 Star"
   },
   "upload": {
     "title": "上传新视频",

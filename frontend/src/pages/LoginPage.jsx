@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Video, Lock, Mail, Loader2, AlertCircle } from 'lucide-react'
+import { Video, Lock, Mail, Loader2, AlertCircle, Github } from 'lucide-react'
 import { login, setAuthToken } from '../api/client'
+import { GITHUB_URL } from '../components/Header'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -102,6 +103,18 @@ export default function LoginPage({ onSuccess }) {
               koucxz@hotmail.com
             </a>
           </p>
+
+          <div className="mt-4 border-t border-border/60 pt-4">
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-primary"
+            >
+              <Github className="h-4 w-4" />
+              GitHub 开源仓库
+            </a>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -45,7 +45,8 @@
     "noteQA": "Note Q&A",
     "settings": "Settings",
     "switchLang": "中",
-    "switchLangTip": "切换到中文"
+    "switchLangTip": "切换到中文",
+    "githubTip": "View the source on GitHub — stars welcome"
   },
   "upload": {
     "title": "Upload Video",

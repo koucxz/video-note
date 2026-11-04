@@ -3,8 +3,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { LangProvider } from "./context/LangContext"
 import { ToastProvider, useToast } from "./context/ToastContext"
 import { setToastHandler, getAuthConfig, getToken } from "./api/client"
+import { Github } from "lucide-react"
 import ErrorBoundary from "./components/ErrorBoundary"
-import Header from "./components/Header"
+import Header, { GITHUB_URL } from "./components/Header"
 import LoginPage from "./pages/LoginPage"
 import UploadPage from "./pages/UploadPage"
 import HistoryPage from "./pages/HistoryPage"
@@ -54,6 +55,20 @@ function MainShell() {
           </ErrorBoundary>
         </div>
       </main>
+      <footer className="border-t border-border/60">
+        <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-muted-foreground sm:flex-row sm:px-6 lg:px-8">
+          <span>VideoNote · AI 视频笔记生成器</span>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-primary"
+          >
+            <Github className="h-3.5 w-3.5" />
+            GitHub 开源仓库
+          </a>
+        </div>
+      </footer>
     </div>
   )
 }
