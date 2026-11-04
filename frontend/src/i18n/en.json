@@ -75,7 +75,11 @@
     "totalFailed": "Failed",
     "noRecords": "No records yet",
     "viewAll": "View all",
-    "viewNote": "View Note"
+    "viewNote": "View Note",
+    "remaining": "left",
+    "merging": "Merging chunks…",
+    "uploadFailed": "Upload failed",
+    "resumedHint": "Resumed from"
   },
   "history": {
     "title": "History",

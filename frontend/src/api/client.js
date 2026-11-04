@@ -60,9 +60,61 @@ export const fetchMe = async () => (await api.get('/auth/me')).data;
 
 // ── Upload ──
 // 小文件单次上传；大文件自动切片（支持断点续传、并发分片、失败重传）
-const CHUNK_SIZE = 2 * 1024 * 1024;        // 2MB / 片
+const CHUNK_SIZE = 2 * 1024 * 1024;        // 2MB / 片（改动会让 upload_id 变化，旧会话不再续传）
 const CHUNK_CONCURRENCY = 3;               // 并发上传片数
 const CHUNK_THRESHOLD = 8 * 1024 * 1024;   // 超过 8MB 走切片
+
+/**
+ * 上传进度上报器：把「已发出的字节」换算成百分比、平滑速率和剩余时间。
+ * onProgress 收到 { loaded, total, percent, speed(byte/s), eta(秒|null), phase }。
+ * phase: 'uploading' 传分片 | 'merging' 服务端合并 | 'done' 完成
+ */
+const createReporter = (total, onProgress) => {
+  let loaded = 0;
+  let speed = 0;
+  let phase = 'uploading';
+  let lastTs = 0;
+  let lastLoaded = 0;
+  let lastEmit = 0;
+
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+  const emit = (force = false) => {
+    const ts = now();
+    // 限流：每片会触发多次 progress 事件，没必要每次都 setState
+    if (!force && ts - lastEmit < 120) return;
+    if (lastTs) {
+      const dt = (ts - lastTs) / 1000;
+      if (dt >= 0.3) {
+        const instant = Math.max(0, (loaded - lastLoaded) / dt);
+        // 指数平滑，避免速度数字上下乱跳
+        speed = speed ? speed * 0.65 + instant * 0.35 : instant;
+        lastTs = ts;
+        lastLoaded = loaded;
+      }
+    } else {
+      lastTs = ts;
+      lastLoaded = loaded;
+    }
+    lastEmit = ts;
+    const done = Math.max(0, Math.min(total, loaded));
+    onProgress?.({
+      loaded: done,
+      total,
+      percent: total ? (done / total) * 100 : 0,
+      speed,
+      eta: speed > 1024 ? Math.max(0, (total - done) / speed) : null,
+      phase,
+    });
+  };
+
+  return {
+    add(n) { loaded += n; emit(); },
+    set(n) { loaded = n; emit(); },
+    setPhase(p) { phase = p; emit(true); },
+    flush() { emit(true); },
+  };
+};
 
 const singleUpload = async (file, onProgress, language, noteStyle, processingOptions) => {
   const formData = new FormData();
@@ -70,9 +122,10 @@ const singleUpload = async (file, onProgress, language, noteStyle, processingOpt
   formData.append('language', language);
   formData.append('note_style', noteStyle);
   formData.append('processing_options', JSON.stringify(processingOptions));
+  const rep = createReporter(file.size, onProgress);
   const response = await api.post('/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (e) => { if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total)); }
+    onUploadProgress: (e) => rep.set(e.loaded),
   });
   return response.data;
 };
@@ -90,28 +143,35 @@ const chunkedUpload = async (file, onProgress, language, noteStyle, processingOp
   const chunkSize = init.chunk_size || CHUNK_SIZE;
   const total = init.total_chunks || totalChunks;
   const done = new Set(init.uploaded || []);
+  const rep = createReporter(file.size, onProgress);
 
-  let sentBytes = 0;
-  done.forEach((i) => {
-    sentBytes += Math.min(chunkSize, file.size - i * chunkSize);
-  });
-  const emit = () => onProgress?.(Math.min(99, Math.round((sentBytes / file.size) * 100)));
-  emit();
+  // 断点续传：服务端已存在的分片直接计入已传字节，进度条从真实位置开始
+  done.forEach((i) => rep.add(Math.min(chunkSize, file.size - i * chunkSize)));
+  rep.flush();
 
   const sendOne = async (i) => {
     const start = i * chunkSize;
     const blob = file.slice(start, Math.min(start + chunkSize, file.size));
     for (let attempt = 0; attempt < 3; attempt++) {
+      let mark = 0;   // 本次尝试已计入的字节，失败重传前要回滚，否则进度会虚高
       try {
         const fd = new FormData();
         fd.append('upload_id', uploadId);
         fd.append('index', String(i));
         fd.append('chunk', blob, `chunk-${i}`);
-        await api.post('/upload/chunk', fd, { timeout: 120000 });
-        sentBytes += blob.size;
-        emit();
+        await api.post('/upload/chunk', fd, {
+          timeout: 120000,
+          // 用请求级进度拿到「真的发出去多少字节」，而不是等整片返回才跳一格
+          onUploadProgress: (e) => {
+            const cur = Math.min(e.loaded, blob.size);
+            rep.add(cur - mark);
+            mark = cur;
+          },
+        });
         return;
       } catch (err) {
+        rep.add(-mark);
+        mark = 0;
         if (attempt === 2) throw err;
         await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
       }
@@ -132,13 +192,15 @@ const chunkedUpload = async (file, onProgress, language, noteStyle, processingOp
   );
   await Promise.all(workers);
 
-  onProgress?.(100);
+  // 分片传完还要等服务端按序合并 1.5GB，别在这里就显示 100% 完成
+  rep.setPhase('merging');
   const res = await api.post('/upload/complete', {
     upload_id: uploadId,
     language,
     note_style: noteStyle,
     processing_options: JSON.stringify(processingOptions || {}),
   }, { timeout: 600000 });
+  rep.setPhase('done');
   return res.data;
 };
 

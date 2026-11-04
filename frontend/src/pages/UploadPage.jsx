@@ -47,6 +47,27 @@ function relativeTime(dateStr, t) {
   return `${Math.floor(hrs / 24)}${t('time.daysAgo')}`
 }
 
+/* 上传进度展示用的小工具 */
+function fmtSize(n) {
+  if (!n) return '0 MB'
+  const mb = n / 1048576
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`
+}
+
+function fmtSpeed(n) {
+  if (!n) return '--'
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB/s` : `${Math.max(0, Math.round(n / 1024))} KB/s`
+}
+
+function fmtEta(s) {
+  if (s == null || !isFinite(s)) return '--:--'
+  const total = Math.max(0, Math.round(s))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = String(total % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
+}
+
 function StatusBadge({ status, t }) {
   const cfg = STATUS_CFG[status] || STATUS_CFG.pending
   const statusKey = STATUS_CFG[status] ? status : 'pending'
@@ -62,6 +83,8 @@ export default function UploadPage() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [processingOptions, setProcessingOptions] = useState({ max_concurrent_tasks: 2, keyframe_interval: 30, segment_duration: 300, subtitle_only: false })
   const [uploading, setUploading] = useState(false)
+  const [uploadPct, setUploadPct] = useState({})   // index -> { percent, loaded, total, speed, eta, phase }
+  const [curIdx, setCurIdx] = useState(-1)
   const [over, setOver] = useState(false)
   const [history, setHistory] = useState([])
   const [results, setResults] = useState([])
@@ -131,16 +154,28 @@ export default function UploadPage() {
     if (!files.length) return
     setUploading(true)
     setResults([])
+    setUploadPct({})
     const out = []
-    for (const f of files) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      setCurIdx(i)
       try {
-        const res = await uploadVideo(f, () => {}, lang, noteStyle, processingOptions)
+        const res = await uploadVideo(
+          f,
+          (info) => setUploadPct((p) => ({ ...p, [i]: info })),
+          lang, noteStyle, processingOptions,
+        )
         if (res.already_completed) out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 })
         else out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 })
-      } catch (e) { out.push({ fileName: f.name, fileSize: f.size, error: e.message, status: 'failed', progress: 0 }) }
+      } catch (e) {
+        const msg = e?.response?.data?.detail || e?.message || t('upload.uploadFailed')
+        out.push({ fileName: f.name, fileSize: f.size, error: msg, status: 'failed', progress: 0 })
+      }
       setResults([...out])
     }
     setUploading(false)
+    setCurIdx(-1)
+    setUploadPct({})
     // 刷新历史列表
     loadHistory()
   }
@@ -417,13 +452,39 @@ export default function UploadPage() {
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">{f.name}</p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                              <span className="text-[11px] text-muted-foreground">{(f.size / 1048576).toFixed(1)} MB</span>
+                              <span className="text-[11px] text-muted-foreground">{fmtSize(f.size)}</span>
                               {r?.task_id && <StatusBadge status={r.status} t={t} />}
                               {r?.stage && r.status === 'processing' && (
                                 <span className="text-[11px] text-primary">{t('processing.stage.' + r.stage)}</span>
                               )}
                               {r?.error && <span className="text-[11px] text-destructive">{r.error}</span>}
                             </div>
+                            {/* 上传中：真实字节进度 + 速率 + 剩余时间 */}
+                            {uploading && uploadPct[i] && (
+                              <div className="mt-1.5 space-y-1">
+                                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className={cn(
+                                      'h-full rounded-full bg-primary transition-[width] duration-200 ease-out',
+                                      uploadPct[i].phase === 'merging' && 'animate-pulse'
+                                    )}
+                                    style={{ width: `${Math.max(1.5, Math.min(100, uploadPct[i].percent))}%` }}
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between gap-2 text-[11px] tabular-nums text-muted-foreground">
+                                  <span>
+                                    {uploadPct[i].phase === 'merging'
+                                      ? t('upload.merging')
+                                      : `${uploadPct[i].percent.toFixed(1)}% · ${fmtSize(uploadPct[i].loaded)} / ${fmtSize(uploadPct[i].total)}`}
+                                  </span>
+                                  {uploadPct[i].phase !== 'merging' && (
+                                    <span>
+                                      {fmtSpeed(uploadPct[i].speed)} · {t('upload.remaining')} {fmtEta(uploadPct[i].eta)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                             {r?.task_id && r.status === 'processing' && (
                               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(r.progress || 0) * 100}%` }} />
@@ -450,7 +511,7 @@ export default function UploadPage() {
               {/* 提交按钮 */}
               <Button className="w-full" size="lg" onClick={go} disabled={!files.length || uploading || stylesLoading || !!stylesError || !selectedStyle}>
                 {uploading
-                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('upload.uploading')}</>
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('upload.uploading')}{uploadPct[curIdx] && uploadPct[curIdx].phase !== 'merging' ? ` ${Math.round(uploadPct[curIdx].percent)}%` : ''}</>
                   : <><Upload className="mr-2 h-4 w-4" />{t('upload.startProcess')}{files.length > 0 && ` (${files.length})`}</>
                 }
               </Button>

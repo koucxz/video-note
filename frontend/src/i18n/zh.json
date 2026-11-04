@@ -75,7 +75,11 @@
     "totalFailed": "处理失败",
     "noRecords": "还没有记录",
     "viewAll": "查看全部",
-    "viewNote": "查看笔记"
+    "viewNote": "查看笔记",
+    "remaining": "剩余",
+    "merging": "合并分片中…",
+    "uploadFailed": "上传失败",
+    "resumedHint": "已从断点续传"
   },
   "history": {
     "title": "记录",
