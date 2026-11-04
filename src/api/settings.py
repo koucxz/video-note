@@ -57,7 +57,7 @@ async def update_settings(body: dict):
     engine = get_engine()
     cfg = engine.config
     if "max_concurrent_tasks" in body:
-        cfg.processing.max_concurrent_tasks = max(1, min(5, int(body["max_concurrent_tasks"])))
+        cfg.processing.max_concurrent_tasks = max(1, min(6, int(body["max_concurrent_tasks"])))
         engine.update_concurrency(cfg.processing.max_concurrent_tasks)
     if "keyframe_interval" in body:
         cfg.processing.keyframe_interval = max(10, min(120, int(body["keyframe_interval"])))

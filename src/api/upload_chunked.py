@@ -244,9 +244,7 @@ async def complete_chunked_upload(req: CompleteRequest):
     try:
         engine = get_engine()
 
-        if "max_concurrent_tasks" in raw_opts:
-            new_limit = _clamp_param("max_concurrent_tasks", raw_opts["max_concurrent_tasks"])
-            engine.update_concurrency(new_limit)
+        # 并发数由服务端 ProcessingConfig 统一控制，忽略客户端传值
 
         file_hash, file_path, is_new = await engine.dedup.process_upload(stream, filename)
         logger.info("Chunks merged %s -> %s (%s)", req.upload_id, file_path, file_hash)

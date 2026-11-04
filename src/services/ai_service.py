@@ -95,7 +95,7 @@ class AIProvider(ABC):
         pass
 
     @abstractmethod
-    async def generate_outline(self, transcript: str, language: str = "zh") -> dict:
+    async def generate_outline(self, transcript: str, language: str = "zh", source: str = "transcript") -> dict:
         pass
 
     @abstractmethod
@@ -198,15 +198,23 @@ class OpenAIProvider(AIProvider):
         return "\n\n".join(all_analyses) if all_analyses else ""
 
     @with_retry(max_retries=3, base_delay=3.0)
-    async def generate_outline(self, transcript: str, language: str = "zh") -> dict:
-        logger.info("Generating outline (lang=%s)", language)
+    async def generate_outline(self, transcript: str, language: str = "zh", source: str = "transcript") -> dict:
+        logger.info("Generating outline (lang=%s, source=%s)", language, source)
         max_chars = 10000
         if len(transcript) > max_chars:
             transcript = transcript[:max_chars] + "..."
         lang_name = "Chinese" if language == "zh" else "English"
-        prompt = (f"Generate an outline from the transcript in {lang_name}.\n\n"
-                  f"Transcript:\n{transcript}\n\n"
-                  'Return JSON: {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        if source == "visual":
+            # 无音轨 / ASR 不可用时的视觉降级：素材是画面分析而不是转写
+            prompt = (f"Below is a visual analysis of frames sampled from a video. The video has no usable "
+                      f"transcript or subtitles, so build the outline purely from what is visible on screen.\n"
+                      f"Generate the outline in {lang_name}.\n\n"
+                      f"Visual analysis:\n{transcript}\n\n"
+                      'Return JSON: {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        else:
+            prompt = (f"Generate an outline from the transcript in {lang_name}.\n\n"
+                      f"Transcript:\n{transcript}\n\n"
+                      'Return JSON: {"title": str, "sections": [{"heading": str, "points": [str]}]}')
         response = await self._llm.chat.completions.create(
             model=self.model, messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"})
@@ -309,15 +317,22 @@ class AnthropicProvider(AIProvider):
         return '\n\n'.join(all_analyses) if all_analyses else ''
 
     @with_retry(max_retries=3, base_delay=3.0)
-    async def generate_outline(self, transcript: str, language: str = 'zh') -> dict:
-        logger.info('Generating outline via Anthropic (lang=%s)', language)
+    async def generate_outline(self, transcript: str, language: str = 'zh', source: str = 'transcript') -> dict:
+        logger.info('Generating outline via Anthropic (lang=%s, source=%s)', language, source)
         max_chars = 10000
         if len(transcript) > max_chars:
             transcript = transcript[:max_chars] + '...'
         lang_name = 'Chinese' if language == 'zh' else 'English'
-        prompt = (f'Generate an outline from the transcript in {lang_name}.\n\n'
-                  f'Transcript:\n{transcript}\n\n'
-                  'Return ONLY valid JSON (no markdown fences): {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        if source == 'visual':
+            prompt = (f'Below is a visual analysis of frames sampled from a video. The video has no usable '
+                      f'transcript or subtitles, so build the outline purely from what is visible on screen.\n'
+                      f'Generate the outline in {lang_name}.\n\n'
+                      f'Visual analysis:\n{transcript}\n\n'
+                      'Return ONLY valid JSON (no markdown fences): {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        else:
+            prompt = (f'Generate an outline from the transcript in {lang_name}.\n\n'
+                      f'Transcript:\n{transcript}\n\n'
+                      'Return ONLY valid JSON (no markdown fences): {"title": str, "sections": [{"heading": str, "points": [str]}]}')
         response = await self._client.messages.create(
             model=self.model, max_tokens=4096,
             messages=[{'role': 'user', 'content': prompt}],

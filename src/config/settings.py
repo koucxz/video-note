@@ -117,7 +117,7 @@ class ProcessingConfig:
     keyframe_interval: int = 30
     max_retries: int = 3
     retry_delay: float = 2.0
-    max_concurrent_tasks: int = 2
+    max_concurrent_tasks: int = 6
 
 
 @dataclass
