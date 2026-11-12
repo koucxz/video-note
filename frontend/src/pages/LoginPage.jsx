@@ -7,9 +7,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 
+const DEFAULT_USERNAME = 'admin'
+const DEFAULT_PASSWORD = 'VideoNote2026.'
+
 export default function LoginPage({ onSuccess }) {
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const [username, setUsername] = useState(DEFAULT_USERNAME)
+  const [password, setPassword] = useState(DEFAULT_PASSWORD)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
