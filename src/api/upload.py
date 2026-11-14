@@ -79,6 +79,12 @@ async def upload_video(
 
         # Check video duration
         duration = await get_video_duration(str(file_path))
+        if duration <= 0:
+            try:
+                file_path.unlink()
+            except OSError:
+                pass
+            raise HTTPException(400, "无法读取视频文件，请上传有效的视频文件")
         duration_warning = None
         if duration > MAX_DURATION_SECONDS:
             raise HTTPException(413, f"Video is too long; maximum is {MAX_DURATION_SECONDS // 60} minutes")

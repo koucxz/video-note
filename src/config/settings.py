@@ -314,6 +314,17 @@ class AppConfig:
                 except ValueError:
                     pass
 
+            # Allow local/test runners to redirect mutable storage without
+            # rewriting config.yaml. Explicit config paths remain isolated.
+            for env_name, field_name in (
+                ("VIDEO_NOTE_DB", "db_path"),
+                ("VIDEO_NOTE_UPLOAD", "upload_dir"),
+                ("VIDEO_NOTE_OUTPUT", "output_dir"),
+            ):
+                value = os.getenv(env_name)
+                if value:
+                    setattr(config.storage, field_name, value)
+
         return config
 
 

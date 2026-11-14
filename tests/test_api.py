@@ -25,7 +25,13 @@ def app(tmp_dir):
     os.environ["VIDEO_NOTE_OUTPUT"] = os.path.join(tmp_dir, "output")
 
     from src.main import app as fastapi_app
-    return fastapi_app
+    yield fastapi_app
+
+    # Release the SQLite handle before TemporaryDirectory cleanup on Windows.
+    import src.core.engine as engine_module
+    if engine_module._engine is not None:
+        engine_module._engine.checkpoint.conn.close()
+        engine_module._engine = None
 
 
 @pytest.fixture
@@ -84,15 +90,15 @@ class TestUploadAPI:
         assert resp.status_code == 400
         assert "Unsupported format" in resp.json()["detail"]
 
-    def test_upload_valid_format(self, client):
-        """Test upload with a minimal valid video file header."""
-        # Create a minimal MP4 file (just the ftyp box)
+    def test_upload_rejects_invalid_video(self, client):
+        """Reject a file that only contains an MP4 type box."""
+        # This is not a playable video: it has no media streams or duration.
         ftyp = b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2mp41'
         resp = client.post("/api/upload",
             files={"file": ("test.mp4", ftyp, "video/mp4")},
             data={"language": "zh", "note_style": "standard"})
-        # Should either succeed (200) or fail with a processing error (500), not 400/422
-        assert resp.status_code in (200, 500)
+        assert resp.status_code == 400
+        assert resp.json()["detail"]
 
     def test_upload_detailed_style_is_preserved(self):
         import asyncio

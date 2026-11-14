@@ -130,6 +130,18 @@ class TestConfig:
         assert cfg.provider.model == "test-model"
         assert cfg.provider.api_key == "sk-test"
 
+    def test_storage_environment_overrides(self, monkeypatch, tmp_path):
+        from src.config.settings import AppConfig
+
+        monkeypatch.setenv("VIDEO_NOTE_DB", str(tmp_path / "test.db"))
+        monkeypatch.setenv("VIDEO_NOTE_UPLOAD", str(tmp_path / "uploads"))
+        monkeypatch.setenv("VIDEO_NOTE_OUTPUT", str(tmp_path / "output"))
+        cfg = AppConfig.load()
+
+        assert cfg.storage.db_path == str(tmp_path / "test.db")
+        assert cfg.storage.upload_dir == str(tmp_path / "uploads")
+        assert cfg.storage.output_dir == str(tmp_path / "output")
+
 
 class TestClassifyError:
     def test_network(self):
