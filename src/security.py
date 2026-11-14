@@ -71,7 +71,10 @@ def valid_csrf(cookie_value: Optional[str], header_value: Optional[str]) -> bool
 
 
 def set_auth_cookies(response, session: str, csrf: str) -> None:
-    secure = os.getenv("VIDEONOTE_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"}
+    # Local HTTP development must be able to send the session cookie. Production
+    # deployments should set VIDEONOTE_COOKIE_SECURE=true explicitly.
+    default_secure = "true" if os.getenv("VIDEONOTE_DOMAIN") else "false"
+    secure = os.getenv("VIDEONOTE_COOKIE_SECURE", default_secure).lower() in {"1", "true", "yes", "on"}
     response.set_cookie(
         SESSION_COOKIE, session, max_age=SESSION_TTL_SECONDS, httponly=True,
         secure=secure, samesite="lax", path="/",

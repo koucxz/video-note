@@ -25,12 +25,29 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   response => response,
-  error => {
+  async error => {
     let msg = error.response?.data?.detail || error.response?.data?.message || error.message || 'Unknown error'
     if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join('; ')
     if (typeof msg === 'object') msg = JSON.stringify(msg)
     msg = String(msg)
     const status = error.response?.status
+    const original = error.config
+    if (
+      status === 403 &&
+      msg === 'CSRF validation failed' &&
+      original &&
+      !original._csrfRetried &&
+      !original.url?.endsWith('/auth/me') &&
+      !original.url?.endsWith('/auth/login')
+    ) {
+      original._csrfRetried = true
+      try {
+        await api.get('/auth/me')
+        return api.request(original)
+      } catch {
+        // Fall through to the normal error handling below.
+      }
+    }
     if (_toast && status !== 404) {
       if (status >= 500) _toast.error(msg, 'Server Error')
       else if (status === 429) _toast.error(msg, 'Rate Limited')

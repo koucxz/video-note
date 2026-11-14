@@ -35,3 +35,14 @@ def test_signed_session_and_csrf(monkeypatch):
     csrf = security.new_csrf_token()
     assert security.valid_csrf(csrf, csrf)
     assert not security.valid_csrf(csrf, "wrong")
+
+
+def test_auth_cookie_defaults_to_non_secure_for_local_http(monkeypatch):
+    from starlette.responses import Response
+    import src.security as security
+
+    monkeypatch.delenv("VIDEONOTE_COOKIE_SECURE", raising=False)
+    monkeypatch.delenv("VIDEONOTE_DOMAIN", raising=False)
+    response = Response()
+    security.set_auth_cookies(response, "session", "csrf")
+    assert "Secure" not in response.headers["set-cookie"]
