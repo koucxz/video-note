@@ -134,15 +134,6 @@ export const generateFlashcards = async (taskId, count = 8) => {
   return (await api.post('/note/' + taskId + '/flashcards', { count })).data;
 };
 
-// ── Collections ──
-export const getCollections = async () => { return (await api.get('/collections')).data; };
-export const createCollection = async (data) => { return (await api.post('/collections', data)).data; };
-export const updateCollection = async (colId, data) => { return (await api.put('/collections/' + colId, data)).data; };
-export const deleteCollection = async (colId) => { return (await api.delete('/collections/' + colId)).data; };
-export const addToCollection = async (colId, noteId) => { return (await api.post('/collections/' + colId + '/notes/' + noteId)).data; };
-export const removeFromCollection = async (colId, noteId) => { return (await api.delete('/collections/' + colId + '/notes/' + noteId)).data; };
-export const getCollectionNotes = async (colId) => { return (await api.get('/collections/' + colId + '/notes')).data; };
-
 // ── Favorites ──
 export const toggleFavorite = async (taskId) => { return (await api.post('/favorites/' + taskId)).data; };
 export const getFavorites = async () => { return (await api.get('/favorites')).data; };
@@ -157,8 +148,6 @@ export const ragAsk = async (question, history = [], scope = {}, sessionId = nul
   })).data;
 };
 export const getRagSessions = async (limit = 50) => (await api.get('/rag/sessions', { params: { limit } })).data;
-export const createRagSession = async (title = '新会话', scope = {}) =>
-  (await api.post('/rag/sessions', { title, scope })).data;
 export const getRagSession = async (sessionId) => (await api.get('/rag/sessions/' + sessionId)).data;
 export const renameRagSession = async (sessionId, title) =>
   (await api.patch('/rag/sessions/' + sessionId, { title })).data;

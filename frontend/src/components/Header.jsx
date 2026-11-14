@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
-import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, Github, LogOut } from "lucide-react"
+import { History, Upload, Sparkles, Settings, Globe, BookOpen, Github, LogOut } from "lucide-react"
 import { logout } from "../api/client"
 import { Button } from "./ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
@@ -16,7 +16,6 @@ function Header() {
   const navItems = [
     { to: "/", icon: Upload, label: t('header.upload') },
     { to: "/history", icon: History, label: t('header.history') },
-    { to: "/collections", icon: Folder, label: t('header.collections') },
     { to: "/rag", icon: BookOpen, label: t('header.noteQA') },
     { to: "/settings", icon: Settings, label: t('header.settings') },
   ]

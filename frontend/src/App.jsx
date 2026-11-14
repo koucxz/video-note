@@ -9,7 +9,6 @@ import HistoryPage from "./pages/HistoryPage"
 import NotePage from "./pages/NotePage"
 import ProcessingPage from "./pages/ProcessingPage"
 import SettingsPage from "./pages/SettingsPage"
-import CollectionsPage from "./pages/CollectionsPage"
 import FlashcardPage from "./pages/FlashcardPage"
 import ModelConfigPage from "./pages/ModelConfigPage"
 import RAGPage from "./pages/RAGPage"
@@ -38,7 +37,6 @@ function App() {
                       <Route path="/note/:taskId" element={<NotePage />} />
                       <Route path="/processing/:taskId" element={<ProcessingPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
-                      <Route path="/collections" element={<CollectionsPage />} />
                       <Route path="/flashcards/:taskId" element={<FlashcardPage />} />
                       <Route path="/rag" element={<RAGPage />} />
                       <Route path="/settings/models" element={<ModelConfigPage />} />
