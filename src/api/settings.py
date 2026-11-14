@@ -7,6 +7,15 @@ from typing import Optional, List
 from ..core.engine import get_engine
 
 router = APIRouter()
+_ALLOW_RUNTIME_PROVIDER_CONFIG = __import__("os").getenv("ALLOW_RUNTIME_PROVIDER_KEYS", "false").lower() in {"1", "true", "yes", "on"}
+
+
+def _public_provider(provider: dict) -> dict:
+    result = {k: v for k, v in provider.items() if k != "api_key"}
+    key = provider.get("api_key", "")
+    result["api_key_set"] = bool(key)
+    result["api_key_masked"] = (key[:4] + "..." + key[-4:]) if len(key) > 12 else ("***" if key else "")
+    return result
 
 # Provider storage file
 _PROVIDERS_FILE = Path("./data/db/providers.json")
@@ -24,15 +33,6 @@ def _load_providers() -> list:
 def _save_providers(providers: list):
     _PROVIDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PROVIDERS_FILE.write_text(json.dumps(providers, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _public_provider(p: dict) -> dict:
-    """对外视图：剔除明文 api_key，只保留掩码与是否已配置。"""
-    key = p.get("api_key") or ""
-    out = {k: v for k, v in p.items() if k != "api_key"}
-    out["api_key_set"] = bool(key)
-    out["api_key_masked"] = "****" if key else ""
-    return out
 
 
 @router.get("/api/settings", tags=["settings"])
@@ -57,7 +57,7 @@ async def update_settings(body: dict):
     engine = get_engine()
     cfg = engine.config
     if "max_concurrent_tasks" in body:
-        cfg.processing.max_concurrent_tasks = max(1, min(3, int(body["max_concurrent_tasks"])))
+        cfg.processing.max_concurrent_tasks = max(1, min(5, int(body["max_concurrent_tasks"])))
         engine.update_concurrency(cfg.processing.max_concurrent_tasks)
     if "keyframe_interval" in body:
         cfg.processing.keyframe_interval = max(10, min(120, int(body["keyframe_interval"])))
@@ -96,11 +96,14 @@ class ProviderUpdate(BaseModel):
 
 @router.get("/api/providers", tags=["providers"])
 async def get_providers():
-    return [_public_provider(p) for p in _load_providers()]
+    providers = _load_providers()
+    return [_public_provider(p) for p in providers]
 
 
 @router.post("/api/providers", tags=["providers"])
 async def add_provider(data: ProviderCreate):
+    if not _ALLOW_RUNTIME_PROVIDER_CONFIG:
+        raise HTTPException(403, "Runtime provider configuration is disabled; configure the server environment instead")
     import uuid
     providers = _load_providers()
     provider = {
@@ -121,6 +124,8 @@ async def add_provider(data: ProviderCreate):
 
 @router.put("/api/providers/{provider_id}", tags=["providers"])
 async def update_provider(provider_id: str, data: ProviderUpdate):
+    if not _ALLOW_RUNTIME_PROVIDER_CONFIG:
+        raise HTTPException(403, "Runtime provider configuration is disabled; configure the server environment instead")
     providers = _load_providers()
     for p in providers:
         if p["id"] == provider_id:
@@ -133,6 +138,8 @@ async def update_provider(provider_id: str, data: ProviderUpdate):
 
 @router.delete("/api/providers/{provider_id}", tags=["providers"])
 async def delete_provider(provider_id: str):
+    if not _ALLOW_RUNTIME_PROVIDER_CONFIG:
+        raise HTTPException(403, "Runtime provider configuration is disabled; configure the server environment instead")
     providers = _load_providers()
     providers = [p for p in providers if p["id"] != provider_id]
     _save_providers(providers)
@@ -141,6 +148,8 @@ async def delete_provider(provider_id: str):
 
 @router.post("/api/providers/{provider_id}/activate", tags=["providers"])
 async def activate_provider(provider_id: str):
+    if not _ALLOW_RUNTIME_PROVIDER_CONFIG:
+        raise HTTPException(403, "Runtime provider configuration is disabled; configure the server environment instead")
     providers = _load_providers()
     for p in providers:
         if p["id"] == provider_id:

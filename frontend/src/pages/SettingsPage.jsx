@@ -28,7 +28,6 @@ import { Label } from "../components/ui/label"
 import { Separator } from "../components/ui/separator"
 import { Skeleton } from "../components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
-import { OverflowTooltip } from "../components/OverflowTooltip"
 import {
   Select,
   SelectContent,
@@ -49,8 +48,6 @@ function SettingsPage() {
   const { t } = useLang()
   const [uploads, setUploads] = useState([])
   const [totalSize, setTotalSize] = useState(0)
-  const [uploadDir, setUploadDir] = useState("")
-  const [outputDir, setOutputDir] = useState("")
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(new Set())
   const [cleaning, setCleaning] = useState(false)
@@ -131,8 +128,6 @@ function SettingsPage() {
       const resp = await api.get("/storage/uploads")
       setUploads(resp.data.files || [])
       setTotalSize(resp.data.total_size || 0)
-      setUploadDir(resp.data.upload_dir || "")
-      setOutputDir(resp.data.output_dir || "")
     } catch (err) {
       console.error(err)
     }
@@ -322,66 +317,13 @@ function SettingsPage() {
                 </span>
               )}
             </Label>
-            <div className="flex gap-1.5">
-              <Input
-                type={keyVisible ? "text" : "password"}
-                value={cfg.api_key || ""}
-                placeholder={cfg.api_key_set ? t('settings.keepCurrent') : "sk-..."}
-                onChange={(e) =>
-                  updateEdit(section, "api_key", e.target.value)
-                }
-                className="font-mono"
-              />
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="shrink-0"
-                      onClick={() =>
-                        setShowKey((p) => ({
-                          ...p,
-                          [section]: !p[section],
-                        }))
-                      }
-                    >
-                      {keyVisible ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {keyVisible ? t('settings.hide') : t('settings.show')}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              {cfg.api_key && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="shrink-0"
-                        onClick={() => copyKey(section, cfg.api_key)}
-                      >
-                        {copied[section] ? (
-                          <Check className="h-4 w-4 text-emerald-500" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t('settings.copy')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
+            <Input
+              value={cfg.api_key_masked || (cfg.api_key_set ? "已由服务器配置" : "未配置")}
+              readOnly
+              disabled
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">API Key 仅从服务器环境变量读取，网页不会显示或修改原文。</p>
           </div>
           {section === "asr" && (
             <div className="flex items-end pb-1">
@@ -632,9 +574,8 @@ function SettingsPage() {
                             )}
                           </button>
                           <div className="min-w-0 flex-1">
-                            <OverflowTooltip as="p" className="truncate text-sm font-medium" text={file.filename} />
-                            <p className="break-all font-mono text-xs text-muted-foreground">
-                              {file.path}
+                            <p className="truncate text-sm font-medium">
+                              {file.filename}
                             </p>
                           </div>
                           <span className="shrink-0 text-sm text-muted-foreground">
@@ -712,7 +653,7 @@ function SettingsPage() {
                               <p className="font-medium">{p.name}</p>
                               <p className="text-xs text-muted-foreground">{p.type} \u2022 {p.model || "default"}</p>
                               {p.api_key_masked && <p className="mt-1 font-mono text-xs text-muted-foreground">{p.api_key_masked}</p>}
-                              {p.base_url && <OverflowTooltip as="p" className="max-w-[200px] truncate text-xs text-muted-foreground" text={p.base_url} />}
+                              {p.base_url && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{p.base_url}</p>}
                             </div>
                             <div className="flex gap-1">
                               {p.is_active ? (

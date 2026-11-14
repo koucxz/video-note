@@ -16,6 +16,14 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
+def _mask_api_key(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 12:
+        return "***"
+    return value[:4] + "..." + value[-4:]
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -69,12 +77,10 @@ class ProviderConfig:
     base_url: str = "https://api.openai.com/v1"
 
     def to_dict(self):
-        key = self.api_key
         return {
             "type": self.type, "model": self.model, "base_url": self.base_url,
-            # 明文 key 绝不回传给客户端；留空表示保持当前配置
-            "api_key": "", "api_key_set": bool(key),
-            "api_key_masked": "****" if key else "",
+            "api_key_set": bool(self.api_key),
+            "api_key_masked": _mask_api_key(self.api_key),
         }
 
     def update(self, data: dict):
@@ -96,11 +102,10 @@ class ASRConfig:
     base_url: str = "https://api.openai.com/v1"
 
     def to_dict(self):
-        key = self.api_key
         return {
             "enabled": self.enabled, "model": self.model, "base_url": self.base_url,
-            "api_key": "", "api_key_set": bool(key),
-            "api_key_masked": "****" if key else "",
+            "api_key_set": bool(self.api_key),
+            "api_key_masked": _mask_api_key(self.api_key),
         }
 
 
@@ -117,7 +122,7 @@ class ProcessingConfig:
     keyframe_interval: int = 30
     max_retries: int = 3
     retry_delay: float = 2.0
-    max_concurrent_tasks: int = 3
+    max_concurrent_tasks: int = 2
 
 
 @dataclass
@@ -143,6 +148,15 @@ class AppConfig:
         }
 
     def update_model_config(self, data: dict) -> dict:
+        # Runtime key updates are intentionally disabled in server-key mode.
+        # They can be enabled explicitly for trusted local development only.
+        allow_runtime_key = os.getenv("ALLOW_RUNTIME_PROVIDER_KEYS", "false").lower() in {"1", "true", "yes", "on"}
+        if not allow_runtime_key:
+            data = {
+                section: {k: v for k, v in values.items() if k != "api_key"}
+                for section, values in data.items()
+                if isinstance(values, dict)
+            }
         if "llm" in data:
             self.provider.update(data["llm"])
         if "vlm" in data:
@@ -190,16 +204,18 @@ class AppConfig:
                         lines[i] = prefix + key + ': ' + str(value)
                         return
 
-        # 安全：api_key 一律不写回 config.yaml，保留文件中的 ${ENV} 占位符，
-        # 避免明文密钥落到被 Git 跟踪 / rw 挂载的配置文件里。
         for section, cfg_obj in [('provider', self.provider), ('vlm', self.vlm)]:
             _set_val(lines, section, 'type', cfg_obj.type)
             _set_val(lines, section, 'model', cfg_obj.model)
             _set_val(lines, section, 'base_url', cfg_obj.base_url)
+            if cfg_obj.api_key and not cfg_obj.api_key.startswith(chr(36)):
+                _set_val(lines, section, 'api_key', cfg_obj.api_key)
 
         _set_val(lines, 'asr', 'enabled', str(self.asr.enabled).lower())
         _set_val(lines, 'asr', 'model', self.asr.model)
         _set_val(lines, 'asr', 'base_url', self.asr.base_url)
+        if self.asr.api_key and not self.asr.api_key.startswith(chr(36)):
+            _set_val(lines, 'asr', 'api_key', self.asr.api_key)
 
         for k in ('segment_duration', 'keyframe_interval', 'max_retries', 'retry_delay', 'max_concurrent_tasks'):
             _set_val(lines, 'processing', k, getattr(self.processing, k))
@@ -210,7 +226,11 @@ class AppConfig:
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "AppConfig":
-        _load_dotenv_if_present(_PROJECT_ROOT / ".env")
+        # An explicit config path must be isolated from the developer's .env.
+        # This also makes tests and migrations deterministic. The default app
+        # load still reads .env for local/Compose deployments.
+        if config_path is None:
+            _load_dotenv_if_present(_PROJECT_ROOT / ".env")
 
         cfg_file = Path(config_path) if config_path else (_PROJECT_ROOT / "config.yaml")
         raw: dict = {}
@@ -270,27 +290,29 @@ class AppConfig:
                     srv.pop("port")
             config.server = ServerConfig(**{**config.server.__dict__, **srv})
 
-        # Legacy env var compat
-        legacy_key = os.getenv("OPENAI_API_KEY")
-        if legacy_key and not config.provider.api_key:
-            config.provider.api_key = legacy_key
-            if not config.vlm.api_key:
-                config.vlm.api_key = legacy_key
-        legacy_base = os.getenv("OPENAI_BASE_URL")
-        if legacy_base and config.provider.base_url == "https://api.openai.com/v1":
-            config.provider.base_url = legacy_base
+        # Environment overrides belong to the default application load only.
+        # Explicit config paths are isolated and must not inherit process-wide
+        # secrets or deployment switches.
+        if config_path is None:
+            legacy_key = os.getenv("OPENAI_API_KEY")
+            if legacy_key and not config.provider.api_key:
+                config.provider.api_key = legacy_key
+                if not config.vlm.api_key:
+                    config.vlm.api_key = legacy_key
+            legacy_base = os.getenv("OPENAI_BASE_URL")
+            if legacy_base and config.provider.base_url == "https://api.openai.com/v1":
+                config.provider.base_url = legacy_base
 
-        asr_env = os.getenv("ASR_ENABLED")
-        if asr_env is not None:
-            config.asr.enabled = asr_env.strip().lower() in {"1", "true", "yes", "on"}
+            asr_env = os.getenv("ASR_ENABLED")
+            if asr_env is not None:
+                config.asr.enabled = asr_env.strip().lower() in {"1", "true", "yes", "on"}
 
-        max_conc = os.getenv("MAX_CONCURRENT_TASKS")
-        if max_conc:
-            try:
-                # 硬上限 3：2G 小机器上单个抽帧峰值约 600MB，超过 3 路并发有 OOM 风险
-                config.processing.max_concurrent_tasks = max(1, min(3, int(max_conc)))
-            except ValueError:
-                pass
+            max_conc = os.getenv("MAX_CONCURRENT_TASKS")
+            if max_conc:
+                try:
+                    config.processing.max_concurrent_tasks = max(1, int(max_conc))
+                except ValueError:
+                    pass
 
         return config
 

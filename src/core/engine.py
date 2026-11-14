@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _PARAM_BOUNDS = {
     "keyframe_interval": (10, 120),
     "segment_duration": (60, 1800),
-    "max_concurrent_tasks": (1, 3),
+    "max_concurrent_tasks": (1, 5),
 }
 
 
@@ -236,40 +236,19 @@ class VideoNoteEngine:
         # Use subtitle text as fallback when transcript is empty
         if not transcript_text and subtitle_text:
             transcript_text = subtitle_text
-
-        if transcript_text.strip():
-            data["outline"] = await self.ai.generate_outline(transcript_text, language)
-            data["content_source"] = "transcript"
-            return data
-
-        # 没有语音文本（无音轨 / ASR 未启用 / 无字幕）→ 回退到关键帧视觉分析
-        logger.info("No transcript or subtitles available; falling back to visual analysis")
-        if not data.get("keyframes"):
-            data = await self._extract_keyframes(video_path, data)
-        if not data.get("frame_analysis"):
-            data = await self._analyze_content(video_path, data)
-
-        visual = (data.get("frame_analysis") or "").strip()
-        if not visual:
-            raise ValueError(
-                "Unable to generate notes: this video has no usable audio, no subtitles, "
-                "and no readable frames. 该视频没有可用音轨、字幕，画面中也读不出文字内容。"
-            )
-        data["outline"] = await self.ai.generate_outline(visual, language, source="visual")
-        data["content_source"] = "visual"
+        if not transcript_text.strip():
+            raise ValueError("No content available for note generation: the video has no audio track or subtitles, and ASR is disabled. "
+                             "Please enable ASR in settings or upload a video with audio/subtitles.")
+        data["outline"] = await self.ai.generate_outline(transcript_text, language)
         return data
 
     async def _extract_keyframes(self, video_path: str, data: dict) -> dict:
-        if data.get("keyframes"):
-            return data
         overrides = data.get("task_overrides", {})
         interval = self._get_task_param(overrides, "keyframe_interval")
         data["keyframes"] = await self.video_service.extract_keyframes(video_path, interval=interval)
         return data
 
     async def _analyze_content(self, video_path: str, data: dict) -> dict:
-        if data.get("frame_analysis"):
-            return data
         language = data.get("language", "zh")
         prompt = "描述这些视频帧的内容" if language == "zh" else "Describe the content of these video frames"
         data["frame_analysis"] = await self.ai.analyze_frames(data["keyframes"], prompt)
@@ -285,11 +264,11 @@ class VideoNoteEngine:
         # Build context from available sources
         context_parts = []
         if transcript_text:
-            context_parts.append(f"Transcript:\n{transcript_text[:3000]}")
+            context_parts.append(f"????:\n{transcript_text[:3000]}")
         if subtitle_text and subtitle_text != transcript_text:
-            context_parts.append(f"Subtitles:\n{subtitle_text[:2000]}")
+            context_parts.append(f"????:\n{subtitle_text[:2000]}")
         if frame_analysis:
-            context_parts.append(f"Visual analysis:\n{frame_analysis}")
+            context_parts.append(f"?????:\n{frame_analysis}")
         if not context_parts:
             raise ValueError("No content available for note generation: no transcript, subtitle, or frame analysis data. "
                              "The video may be corrupted or have no readable content.")
@@ -301,6 +280,11 @@ class VideoNoteEngine:
         version = self.checkpoint.add_note_version(
             task_id, note_content, source="generated",
             style=note_style, model_name=self.ai.model)
+        if self.vector is not None:
+            try:
+                self.vector.index_note(task_id, note_content)
+            except Exception as exc:
+                logger.warning("Failed to refresh vector index for %s: %s", task_id[:8], exc)
         # Accumulate token count
         old_tokens = 0
         task_row = self.checkpoint.get_task(task_id)

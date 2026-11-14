@@ -1,0 +1,13 @@
+{$VIDEONOTE_DOMAIN} {
+    encode gzip
+    request_body {
+        max_size 512MB
+    }
+    reverse_proxy frontend:80
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "same-origin"
+        -Server
+    }
+}

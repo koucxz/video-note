@@ -1,61 +1,20 @@
-﻿FROM python:3.11-slim
+﻿FROM python:3.11-slim AS backend
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HF_ENDPOINT=https://hf-mirror.com \
-    OMP_NUM_THREADS=1 \
-    TOKENIZERS_PARALLELISM=false
-
-# ffmpeg: 音视频处理
-# libpango/libcairo/libgdk-pixbuf: weasyprint 渲染 PDF
-# fonts-noto-cjk: 中文 PDF 不出方块
-# 先把 apt 源换成腾讯云内网镜像（国内构建快 10 倍以上）
-RUN set -eux; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's|deb.debian.org|mirrors.tencentyun.com|g; s|security.debian.org|mirrors.tencentyun.com|g' /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i 's|deb.debian.org|mirrors.tencentyun.com|g; s|security.debian.org|mirrors.tencentyun.com|g' /etc/apt/sources.list; \
-    fi; \
-    apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
-        curl \
-        libpango-1.0-0 \
-        libpangoft2-1.0-0 \
-        libharfbuzz-subset0 \
-        libcairo2 \
-        libgdk-pixbuf-2.0-0 \
-        libglib2.0-0 \
-        libffi8 \
-        shared-mime-info \
-        fonts-noto-cjk \
-    && rm -rf /var/lib/apt/lists/*
-
-# pip 走腾讯云镜像，避免 pypi 直连超时
-RUN pip config set global.index-url https://mirrors.cloud.tencent.com/pypi/simple \
-    && pip config set global.trusted-host mirrors.cloud.tencent.com
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# 先装 CPU-only torch：否则 sentence-transformers 会拉 CUDA 版 torch(约 2.5GB)，
-# 2C2G 机器上既费磁盘也容易构建 OOM。
-RUN pip install torch \
-        --index-url https://download.pytorch.org/whl/cpu \
-        --extra-index-url https://mirrors.cloud.tencent.com/pypi/simple
-
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
-COPY config.yaml .
+# Never bake the developer's config.yaml (which may contain secrets) into the image.
+COPY config.yaml.example ./config.yaml
 
 RUN mkdir -p data/db data/uploads data/output data/temp
 
+RUN useradd --create-home --shell /usr/sbin/nologin app \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1
-
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

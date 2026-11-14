@@ -3,8 +3,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from ..core.engine import get_engine
+import os
 
 router = APIRouter()
+_ALLOW_RUNTIME_CONFIG = os.getenv("ALLOW_RUNTIME_PROVIDER_CONFIG", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class ModelUpdate(BaseModel):
@@ -25,6 +27,8 @@ async def get_model_config():
     summary="Update model configuration",
     description="Update AI model settings. Changes take effect immediately.")
 async def update_model_config(data: ModelUpdate):
+    if not _ALLOW_RUNTIME_CONFIG:
+        raise HTTPException(403, "Runtime model configuration is disabled; configure the server environment instead")
     engine = get_engine()
     update_data = data.model_dump(exclude_none=True)
     result = engine.config.update_model_config(update_data)

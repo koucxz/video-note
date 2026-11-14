@@ -39,7 +39,6 @@ async def list_uploads():
                     "hash": hash_id,
                     "filename": original_name,
                     "size": f.stat().st_size,
-                    "path": str(f.resolve()),
                 })
     
     files.sort(key=lambda x: x["size"], reverse=True)
@@ -49,8 +48,6 @@ async def list_uploads():
         "files": files,
         "count": len(files),
         "total_size": total_size,
-        "upload_dir": str(upload_dir.resolve()),
-        "output_dir": str(Path(engine.config.storage.output_dir).resolve()),
     }
 
 

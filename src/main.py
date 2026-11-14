@@ -1,20 +1,19 @@
 """VideoNote main application."""
 import logging
 import asyncio
-import os
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qs
-from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from pathlib import Path
 
-from .api import upload_router, upload_chunked_router, task_router, note_router, storage_router, model_config_router, settings_router
+from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router, auth_router
 from .api.ws_manager import ws_manager
 from .core.engine import get_engine
-from .api.auth import PUBLIC_PATHS, auth_enabled, check_request_auth, router as auth_router
+from .security import AUTH_ENABLED, CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, SESSION_SECRET, valid_csrf, validate_session
+from .rate_limit import allow_request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,6 +22,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init engine + reset zombie tasks."""
+    if AUTH_ENABLED and not SESSION_SECRET:
+        raise RuntimeError("VIDEONOTE_SESSION_SECRET must be set when VIDEONOTE_AUTH_PASSWORD is configured")
     engine = get_engine()
     logger.info("VideoNote engine ready (ASR=%s)", engine.ai.asr_enabled)
     yield
@@ -50,10 +51,8 @@ Convert videos into structured notes using AI.
 """,
     version="1.2.0",
     lifespan=lifespan,
-    # 公网部署：关闭交互式文档与 OpenAPI schema，避免把全部接口清单暴露给扫描器
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
+    docs_url="/docs",
+    redoc_url="/redoc",
     openapi_tags=[
         {"name": "upload", "description": "Video upload and processing"},
         {"name": "tasks", "description": "Task management and status"},
@@ -62,47 +61,55 @@ Convert videos into structured notes using AI.
     ]
 )
 
-
-@app.middleware("http")
-async def _auth_guard(request, call_next):
-    """单用户登录守卫：未登录一律 401。OPTIONS 预检与公开路径放行。"""
-    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS:
-        return await call_next(request)
-    if not auth_enabled():
-        return await call_next(request)
-    if not check_request_auth(
-        request.headers.get("authorization"),
-        request.headers.get("x-vn-token"),
-    ):
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "未登录或登录已过期"},
-        )
-    return await call_next(request)
-
-
-_cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
-_cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
-_allow_any_origin = "*" in _cors_origins
+import os
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    # 用 header 传 token，不依赖 cookie，所以允许任意源时可以不启用 credentials
-    allow_origins=["*"] if _allow_any_origin else _cors_origins,
-    allow_credentials=not _allow_any_origin,
+    allow_origins=[o.strip() for o in cors_origins],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    # 预检结果缓存 24 小时：切片上传几千次 POST，不缓存的话每次都要多一轮 OPTIONS
-    max_age=86400,
 )
 
-app.include_router(auth_router)
+_AUTH_BYPASS = {"/api/health", "/api/auth/login", "/api/auth/me", "/api/auth/logout"}
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Protect API routes when a production password is configured.
+
+    Local development remains backwards compatible when VIDEONOTE_AUTH_PASSWORD
+    is unset. Production deployments must set both auth password and session
+    secret in the environment.
+    """
+    protected_path = request.url.path.startswith("/api") or request.url.path.startswith("/static/output")
+    if AUTH_ENABLED and protected_path:
+        # A signed session is stable per browser and avoids collapsing all
+        # users behind the frontend container into one rate-limit bucket.
+        client_id = request.cookies.get(SESSION_COOKIE, "")
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        client_id = client_id or forwarded_for.split(",", 1)[0].strip() or request.headers.get("x-real-ip", "")
+        client_id = client_id or (request.client.host if request.client else "unknown")
+        if request.url.path.startswith("/api") and not allow_request(client_id, request.method, request.url.path):
+            return JSONResponse(status_code=429, content={"detail": "Too many requests"}, headers={"Retry-After": "60"})
+        path = request.url.path
+        if path not in _AUTH_BYPASS:
+            if not validate_session(request.cookies.get(SESSION_COOKIE)):
+                return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+            if request.method in _MUTATING_METHODS and not valid_csrf(
+                request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)
+            ):
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+    return await call_next(request)
+
 app.include_router(upload_router)
-app.include_router(upload_chunked_router)
 app.include_router(task_router)
 app.include_router(note_router)
 app.include_router(storage_router)
 app.include_router(model_config_router)
 app.include_router(settings_router)
+app.include_router(auth_router)
 
 output_dir = Path("./data/output")
 output_dir.mkdir(parents=True, exist_ok=True)
@@ -125,23 +132,20 @@ async def health_check():
         "concurrency": engine.config.processing.max_concurrent_tasks,
     }
 
-
-def _ws_token_ok(websocket: WebSocket) -> bool:
-    """WebSocket 握手鉴权：token 走 query 参数（浏览器 WebSocket API 不能自定义头）。
-
-    支持登录签发的 Bearer token 与静态 API_TOKEN；鉴权关闭时放行（本地开发）。
-    """
-    if not auth_enabled():
+def _websocket_allowed(websocket: WebSocket) -> bool:
+    if not AUTH_ENABLED:
         return True
-    qs = parse_qs(websocket.scope.get("query_string", b"").decode("utf-8", "ignore"))
-    token = (qs.get("token") or [""])[0]
-    return check_request_auth(f"Bearer {token}", token)
+    if not validate_session(websocket.cookies.get(SESSION_COOKIE)):
+        return False
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    return origin in {o.strip() for o in cors_origins if o.strip()}
 
 
 @app.websocket("/ws/task/{task_id}")
 async def websocket_task(websocket: WebSocket, task_id: str):
-    # Starlette 1.x 要求 websocket 参数显式标注类型，否则会被当成必填 query 参数并拒绝握手
-    if not _ws_token_ok(websocket):
+    if not _websocket_allowed(websocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -154,10 +158,9 @@ async def websocket_task(websocket: WebSocket, task_id: str):
     finally:
         ws_manager.unregister(websocket, task_id)
 
-
 @app.websocket("/ws/all")
 async def websocket_all(websocket: WebSocket):
-    if not _ws_token_ok(websocket):
+    if not _websocket_allowed(websocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -171,20 +174,7 @@ async def websocket_all(websocket: WebSocket):
         ws_manager.unregister(websocket)
 
 
-@app.exception_handler(HTTPException)
-async def _http_exception_handler(request, exc: HTTPException):
-    """5xx 统一脱敏：内部异常文本只写服务端日志，不回显给客户端。"""
-    if exc.status_code >= 500:
-        logger.error("HTTP %s %s: %s", exc.status_code, request.url.path, exc.detail)
-        return JSONResponse(status_code=exc.status_code, content={"detail": "服务器内部错误，请稍后重试"})
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers=exc.headers,
-    )
-
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error("Unhandled exception: %s", exc, exc_info=True)
-    return JSONResponse(status_code=500, content={"error": "服务器内部错误"})
+    return JSONResponse(status_code=500, content={"error": "Internal server error"})
