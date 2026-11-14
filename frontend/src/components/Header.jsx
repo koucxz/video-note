@@ -1,20 +1,16 @@
 import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
-import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, LogOut, Github } from "lucide-react"
+import { History, Upload, Sparkles, Settings, Globe, Folder, BookOpen, Github, LogOut } from "lucide-react"
+import { logout } from "../api/client"
 import { Button } from "./ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
-import { clearAuthToken, getToken } from "../api/client"
-
-// 项目仓库地址：顶栏和页脚共用
-export const GITHUB_URL = "https://github.com/koucxz/video-note"
 
 function Header() {
   const location = useLocation()
   const { t, toggleLang } = useLang()
 
-  const handleLogout = () => {
-    clearAuthToken()
-    window.dispatchEvent(new CustomEvent('vn-unauthorized'))
+  const handleLogout = async () => {
+    try { await logout() } finally { window.dispatchEvent(new CustomEvent("vn-unauthorized")) }
   }
 
   const navItems = [
@@ -40,7 +36,7 @@ function Header() {
             {navItems.map(({ to, icon: Icon, label }) => (
               <Tooltip key={to}>
                 <TooltipTrigger asChild>
-                  <Button variant={location.pathname === to ? "secondary" : "ghost"} size="sm" asChild>
+                  <Button variant={(location.pathname === to || (to !== "/" && location.pathname.startsWith(to + "/"))) ? "secondary" : "ghost"} size="sm" asChild>
                     <Link to={to} className="flex shrink-0 items-center gap-2">
                       <Icon className="h-4 w-4" />
                       <span className="hidden md:inline">{label}</span>
@@ -56,12 +52,7 @@ function Header() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" asChild>
-                  <a
-                    href={GITHUB_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-2"
-                  >
+                  <a href="https://github.com/koucxz/video-note" target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-2">
                     <Github className="h-4 w-4" />
                     <span className="hidden sm:inline">GitHub</span>
                   </a>
@@ -69,7 +60,6 @@ function Header() {
               </TooltipTrigger>
               <TooltipContent side="bottom"><p>{t('header.githubTip')}</p></TooltipContent>
             </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" onClick={toggleLang} className="inline-flex items-center gap-1">
@@ -79,17 +69,14 @@ function Header() {
               </TooltipTrigger>
               <TooltipContent side="bottom"><p>{t('header.switchLangTip')}</p></TooltipContent>
             </Tooltip>
-
-            {getToken() && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="sm" onClick={handleLogout}>
-                    <LogOut className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom"><p>退出登录</p></TooltipContent>
-              </Tooltip>
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={handleLogout} aria-label={t('header.logout')}>
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom"><p>{t('header.logout')}</p></TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </header>
