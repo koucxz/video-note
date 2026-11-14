@@ -532,6 +532,26 @@ _MAX_RAG_QUESTION = 4000
 _MAX_RAG_HISTORY_ITEM = 4000
 
 
+def _response_value(message, name: str):
+    if isinstance(message, dict):
+        return message.get(name)
+    return getattr(message, name, None)
+
+
+def _extract_thinking(message) -> str:
+    """Read optional reasoning text without inventing hidden chain of thought."""
+    value = _response_value(message, "reasoning_content") or _response_value(message, "thinking") or ""
+    if isinstance(value, list):
+        value = "\n".join(str(item) for item in value if item)
+    return str(value).strip()
+
+
+def _persist_rag_exchange(engine, session_id, question, answer, sources, tokens, scope):
+    return engine.checkpoint.save_qa_exchange(
+        session_id, question, answer, sources, tokens, scope,
+    )
+
+
 def _validate_rag_scope(scope):
     if scope is None:
         return {}
@@ -670,11 +690,9 @@ async def rag_ask(body: dict = {}):
 
     if not relevant_chunks:
         answer = "No notes available for Q&A."
-        if session_id:
-            saved = engine.checkpoint.save_qa_exchange(session_id, question, answer, [], 0, scope)
-            return {"session_id": session_id, "answer": answer, "sources": [], "tokens": 0,
-                    **saved}
-        return {"answer": answer, "sources": []}
+        saved = _persist_rag_exchange(engine, session_id, question, answer, [], 0, scope)
+        return {"session_id": saved.get("session_id") or session_id, "answer": answer, "sources": [], "tokens": 0,
+                "thinking": "", **saved}
 
     # Build context from relevant chunks
     context_parts = []
@@ -698,23 +716,32 @@ async def rag_ask(body: dict = {}):
         if hasattr(engine.ai, '_llm'):
             response = await engine.ai._llm.chat.completions.create(
                 model=engine.ai.model, messages=messages, max_tokens=2048)
-            answer = response.choices[0].message.content or ""
+            message = response.choices[0].message
+            answer = _response_value(message, "content") or ""
+            thinking = _extract_thinking(message)
             tokens = getattr(response, 'usage', None)
             total = (getattr(tokens, 'total_tokens', 0) or 0) if tokens else 0
         elif hasattr(engine.ai, '_client'):
             response = await engine.ai._client.messages.create(
                 model=engine.ai.model, max_tokens=2048, messages=messages)
-            answer = "".join(b.text for b in response.content if hasattr(b, "text"))
+            thinking_parts = []
+            answer_parts = []
+            for block in response.content:
+                if _response_value(block, "thinking"):
+                    thinking_parts.append(str(_response_value(block, "thinking")))
+                if _response_value(block, "text"):
+                    answer_parts.append(str(_response_value(block, "text")))
+            answer = "".join(answer_parts)
+            thinking = "\n".join(thinking_parts).strip()
             total = (getattr(response.usage, 'input_tokens', 0) or 0) + (getattr(response.usage, 'output_tokens', 0) or 0)
         else:
             answer = "RAG Q&A not available with current provider."
+            thinking = ""
             total = 0
 
-        if session_id:
-            saved = engine.checkpoint.save_qa_exchange(session_id, question, answer, sources[:5], total, scope)
-            return {"session_id": session_id, "answer": answer, "sources": sources[:5], "tokens": total,
-                    **saved}
-        return {"answer": answer, "sources": sources[:5], "tokens": total}
+        saved = _persist_rag_exchange(engine, session_id, question, answer, sources[:5], total, scope)
+        return {"session_id": saved.get("session_id") or session_id, "answer": answer, "sources": sources[:5],
+                "tokens": total, "thinking": thinking, **saved}
     except Exception as exc:
         raise HTTPException(500, f"RAG Q&A failed: {exc}")
 

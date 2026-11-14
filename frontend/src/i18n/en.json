@@ -41,7 +41,6 @@
   "header": {
     "upload": "Upload",
     "history": "History",
-    "collections": "Collections",
     "noteQA": "Note Q&A",
     "settings": "Settings",
     "githubTip": "Open GitHub repository",
@@ -192,20 +191,6 @@
     "front": "Question",
     "back_side": "Answer"
   },
-  "collections": {
-    "title": "Collections",
-    "notes": "notes",
-    "delete": "Delete",
-    "newCollection": "New Collection",
-    "collectionName": "Collection name",
-    "create": "Create",
-    "noteList": "Notes",
-    "noNotes": "No notes",
-    "addNotes": "Add notes to collection",
-    "all": "All",
-    "add": "Add ({{count}})",
-    "confirmDelete": "Delete this collection?"
-  },
   "rag": {
     "title": "Note Q&A",
     "desc": "Ask questions across all your video notes.",
@@ -217,11 +202,15 @@
     "renamePrompt": "Enter a session name",
     "deleteSession": "Delete session",
     "confirmDeleteSession": "Delete this chat session?",
+    "sessionLoadFailed": "Unable to load chat sessions",
+    "renameFailed": "Rename failed",
+    "deleteFailed": "Delete failed",
     "knowledgeScope": "Knowledge Scope",
     "all": "All",
     "searchingAll": "Searching all notes",
     "selectedCount": "{{count}} selected",
     "thinking": "Thinking...",
+    "thinkingProcess": "Reasoning",
     "thinkingSearch": "Searching relevant notes",
     "thinkingContext": "Organizing context",
     "thinkingAnswer": "Writing the answer",
@@ -230,7 +219,6 @@
     "clear": "Clear",
     "basedOnSelected": "Ask across {{count}} selected notes",
     "basedOnAll": "Ask questions across all your video notes",
-    "byCollection": "By Collection",
     "generateFailed": "Failed to generate answer",
     "requestFailed": "Request failed, please try again"
   },

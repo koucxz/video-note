@@ -41,7 +41,6 @@
   "header": {
     "upload": "上传",
     "history": "记录",
-    "collections": "合集",
     "noteQA": "笔记问答",
     "settings": "设置",
     "githubTip": "打开 GitHub 仓库",
@@ -192,20 +191,6 @@
     "front": "问题",
     "back_side": "答案"
   },
-  "collections": {
-    "title": "分类合集",
-    "notes": "篇笔记",
-    "delete": "删除",
-    "newCollection": "新建合集",
-    "collectionName": "合集名称",
-    "create": "创建",
-    "noteList": "笔记列表",
-    "noNotes": "暂无笔记",
-    "addNotes": "添加笔记到合集",
-    "all": "全选",
-    "add": "添加 ({{count}})",
-    "confirmDelete": "确定删除此合集？"
-  },
   "rag": {
     "title": "笔记问答",
     "desc": "基于你所有的视频笔记进行智能问答",
@@ -217,11 +202,15 @@
     "renamePrompt": "请输入会话名称",
     "deleteSession": "删除会话",
     "confirmDeleteSession": "确定删除此问答会话？",
+    "sessionLoadFailed": "会话加载失败",
+    "renameFailed": "重命名失败",
+    "deleteFailed": "删除失败",
     "knowledgeScope": "知识范围",
     "all": "全部",
     "searchingAll": "搜索所有笔记",
     "selectedCount": "已选 {{count}} 篇",
     "thinking": "思考中...",
+    "thinkingProcess": "思考过程",
     "thinkingSearch": "检索相关笔记",
     "thinkingContext": "整理上下文",
     "thinkingAnswer": "生成回答",
@@ -230,7 +219,6 @@
     "clear": "清除",
     "basedOnSelected": "基于已选的 {{count}} 篇笔记进行问答",
     "basedOnAll": "基于所有视频笔记进行智能问答",
-    "byCollection": "按合集选择",
     "generateFailed": "回答生成失败",
     "requestFailed": "请求失败，请重试"
   },

@@ -261,6 +261,13 @@ class TestQASessions:
         assert messages[1]["sources"][0]["task_id"] == "t1"
         assert checkpoint.get_qa_session(session["id"])["message_count"] == 2
 
+    def test_first_exchange_creates_session_without_empty_row(self, checkpoint):
+        saved = checkpoint.save_qa_exchange(None, "首个问题", "首个回答", scope={"task_ids": []})
+        assert saved["session_id"]
+        session = checkpoint.get_qa_session(saved["session_id"])
+        assert session["message_count"] == 2
+        assert checkpoint.list_qa_sessions()[0]["id"] == saved["session_id"]
+
     def test_exchange_rolls_back_when_session_missing(self, checkpoint):
         with pytest.raises(KeyError):
             checkpoint.save_qa_exchange("missing", "问题", "答案")

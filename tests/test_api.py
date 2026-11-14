@@ -249,6 +249,12 @@ class TestRAGAPI:
         resp = client.post("/api/rag/ask", json={"question": ""})
         assert resp.status_code == 400
 
+    def test_rag_thinking_field_extraction(self):
+        from src.api.note import _extract_thinking
+
+        assert _extract_thinking({"reasoning_content": "先检索，再回答"}) == "先检索，再回答"
+        assert _extract_thinking({"content": "只有答案"}) == ""
+
     def test_rag_ask_no_notes(self, client):
         resp = client.post("/api/rag/ask", json={"question": "What is this about?"})
         assert resp.status_code == 200
@@ -261,10 +267,14 @@ class TestRAGAPI:
         session_id = created.json()["id"]
         listed = client.get("/api/rag/sessions")
         assert listed.status_code == 200
+        assert not any(item["id"] == session_id for item in listed.json()["sessions"])
+        from src.core.engine import get_engine
+        get_engine().checkpoint.save_qa_exchange(session_id, "问题", "回答")
+        listed = client.get("/api/rag/sessions")
         assert any(item["id"] == session_id for item in listed.json()["sessions"])
         detail = client.get(f"/api/rag/sessions/{session_id}")
         assert detail.status_code == 200
-        assert detail.json()["messages"] == []
+        assert len(detail.json()["messages"]) == 2
         renamed = client.patch(f"/api/rag/sessions/{session_id}", json={"title": "Renamed"})
         assert renamed.status_code == 200
         assert renamed.json()["title"] == "Renamed"

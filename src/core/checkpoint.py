@@ -294,6 +294,7 @@ class CheckpointManager:
                    FROM qa_sessions s
                    LEFT JOIN qa_messages m ON m.session_id = s.id
                    GROUP BY s.id
+                   HAVING COUNT(m.id) > 0
                    ORDER BY s.updated_at DESC, s.rowid DESC
                    LIMIT ?""",
                 (limit,),
@@ -371,10 +372,10 @@ class CheckpointManager:
             })
         return result
 
-    def save_qa_exchange(self, session_id: str, question: str, answer: str,
+    def save_qa_exchange(self, session_id: Optional[str], question: str, answer: str,
                          sources: Optional[list] = None, tokens: int = 0,
                          scope: Optional[dict] = None) -> dict:
-        """Atomically persist one user question and its assistant answer."""
+        """Atomically persist one exchange, creating a session only when needed."""
         user_id = str(uuid.uuid4())
         assistant_id = str(uuid.uuid4())
         now = datetime.now()
@@ -383,11 +384,20 @@ class CheckpointManager:
         with self._lock:
             self.conn.execute("BEGIN")
             try:
-                exists = self.conn.execute(
-                    "SELECT 1 FROM qa_sessions WHERE id = ?", (session_id,)
-                ).fetchone()
-                if not exists:
-                    raise KeyError(f"QA session not found: {session_id}")
+                if session_id:
+                    exists = self.conn.execute(
+                        "SELECT 1 FROM qa_sessions WHERE id = ?", (session_id,)
+                    ).fetchone()
+                    if not exists:
+                        raise KeyError(f"QA session not found: {session_id}")
+                else:
+                    session_id = str(uuid.uuid4())
+                    title = question.strip()[:30] or "新会话"
+                    self.conn.execute(
+                        """INSERT INTO qa_sessions (id, title, scope, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (session_id, title, json.dumps(scope, ensure_ascii=False), now, now),
+                    )
                 payload = json.dumps(sources, ensure_ascii=False)
                 self.conn.execute(
                     """INSERT INTO qa_messages
@@ -410,6 +420,7 @@ class CheckpointManager:
                 self.conn.execute("ROLLBACK")
                 raise
         return {
+            "session_id": session_id,
             "user_message": {"id": user_id, "session_id": session_id, "role": "user", "content": question,
                               "sources": [], "tokens": 0, "created_at": now.isoformat()},
             "assistant_message": {"id": assistant_id, "session_id": session_id, "role": "assistant", "content": answer,
