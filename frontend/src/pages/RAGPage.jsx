@@ -39,13 +39,25 @@ function ThinkingIndicator({ step, t }) {
 
 function ThinkingText({ content, done, t }) {
   if (!content) return null
+  const lines = String(content)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((line, index, items) => index === 0 || line !== items[index - 1])
+    .slice(-3)
+
   return (
     <div className="mb-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
       <div className="mb-1 flex items-center gap-1.5 font-medium text-foreground">
         <span className={cn("h-1.5 w-1.5 rounded-full bg-primary", !done && "animate-pulse")} />
         {t("rag.thinkingProcess")}
       </div>
-      <div className="whitespace-pre-wrap leading-5">{content}</div>
+      <div className="space-y-0.5" aria-live="polite">
+        {lines.map((line, index) => (
+          <div key={index} className="truncate leading-5" title={line}>{line}</div>
+        ))}
+      </div>
     </div>
   )
 }
