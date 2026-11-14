@@ -181,7 +181,9 @@
       "interrupted": "Interrupted",
       "interruptedHint": "Service may have restarted. Retry to continue.",
       "unknown": "Failed",
-      "unknownHint": "An unknown error occurred. Please retry."
+      "unknownHint": "An unknown error occurred. Please retry.",
+      "quota": "Daily AI quota reached",
+      "quotaHint": "It resets tomorrow, or raise the daily token limit in Settings"
     }
   },
   "flashcard": {

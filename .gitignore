@@ -30,3 +30,5 @@ start-backend.ps1
 .coverage
 
 tools/
+.vercel
+.env*

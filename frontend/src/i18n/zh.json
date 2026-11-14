@@ -181,7 +181,9 @@
       "interrupted": "处理被中断",
       "interruptedHint": "服务可能重启过，点击重试继续",
       "unknown": "处理失败",
-      "unknownHint": "发生未知错误，请重试"
+      "unknownHint": "发生未知错误，请重试",
+      "quota": "今日 AI 额度已用完",
+      "quotaHint": "明天自动恢复，也可以在设置里调大每日 token 上限"
     }
   },
   "flashcard": {

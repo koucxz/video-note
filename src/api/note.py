@@ -432,6 +432,8 @@ async def generate_flashcards(task_id: str, body: dict = {}):
                 for pt in sec.get("points", []):
                     cards.append({"front": sec.get("heading", ""), "back": pt})
         return {"cards": cards[:count]}
+    except TokenBudgetExceeded as exc:
+        raise HTTPException(429, str(exc))
     except Exception as exc:
         raise HTTPException(500, f"Flashcard generation failed: {exc}")
 

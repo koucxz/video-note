@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   Loader2,
@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   FileQuestion,
   Scissors,
+  Gauge,
 } from "lucide-react"
 import { getTaskStatus, retryTask, cancelTask } from "../api/client"
 import { useTaskWebSocket } from "../hooks/useWebSocket"
@@ -25,6 +26,7 @@ const ERROR_KIND_ICONS = {
   ffmpeg: Scissors,
   format: FileQuestion,
   interrupted: RefreshCw,
+  quota: Gauge,
   unknown: AlertTriangle,
 }
 
