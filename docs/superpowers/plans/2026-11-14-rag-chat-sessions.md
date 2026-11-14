@@ -188,4 +188,3 @@ Expected: all existing and new tests pass.
 - [ ] **Step 4: Review the final diff**
 
 Run: `git diff --check` and `git status --short`，确认只包含会话功能相关文件。
-
