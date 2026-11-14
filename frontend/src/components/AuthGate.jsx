@@ -5,7 +5,7 @@ import LoginPage from "../pages/LoginPage"
 function AuthGate({ children }) {
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState("VideoNote2026.")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
