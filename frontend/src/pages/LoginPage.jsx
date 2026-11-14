@@ -1,10 +1,10 @@
-import { AlertCircle, BookOpen, Loader2, LockKeyhole } from "lucide-react"
+import { AlertCircle, BookOpen, Loader2, LockKeyhole, UserRound } from "lucide-react"
 import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 
-export default function LoginPage({ password, setPassword, error, loading, onSubmit }) {
+export default function LoginPage({ username, password, setPassword, error, loading, onSubmit }) {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-10">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.08),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.07),transparent_38%)]" />
@@ -19,6 +19,21 @@ export default function LoginPage({ password, setPassword, error, loading, onSub
           </div>
 
           <form onSubmit={onSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="login-username" className="text-slate-700">用户名</Label>
+              <div className="relative">
+                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  id="login-username"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  readOnly
+                  className="h-11 border-slate-200 bg-slate-50 pl-10 text-slate-900 shadow-sm focus-visible:ring-primary"
+                />
+              </div>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="login-password" className="text-slate-700">访问密码</Label>
               <div className="relative">

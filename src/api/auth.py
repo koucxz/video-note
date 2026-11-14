@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
+    username: str = "admin"
     password: str
 
 
@@ -30,8 +31,8 @@ async def login(data: LoginRequest):
     from ..security import AUTH_PASSWORD
     import hmac
 
-    if not hmac.compare_digest(data.password, AUTH_PASSWORD):
-        raise HTTPException(status_code=401, detail="Invalid password")
+    if data.username.strip() != "admin" or not hmac.compare_digest(data.password, AUTH_PASSWORD):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     response = JSONResponse({"authenticated": True, "auth_enabled": True})
     set_auth_cookies(response, create_session(), new_csrf_token())
     return response

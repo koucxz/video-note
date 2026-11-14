@@ -11,6 +11,7 @@ function AuthGate({ children }) {
   const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
+  const [username] = useState("admin")
   const [password, setPassword] = useState("VideoNote2026.")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -48,7 +49,7 @@ function AuthGate({ children }) {
     setError("")
     setSubmitting(true)
     try {
-      await login(password)
+      await login(username, password)
       resetAuthFailure()
       setAuthenticated(true)
       setPassword("")
@@ -64,7 +65,7 @@ function AuthGate({ children }) {
   }
   if (authenticated) return children
 
-  return <LoginPage password={password} setPassword={setPassword} error={error} loading={submitting} onSubmit={submit} />
+  return <LoginPage username={username} password={password} setPassword={setPassword} error={error} loading={submitting} onSubmit={submit} />
 }
 
 export default AuthGate

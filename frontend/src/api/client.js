@@ -234,7 +234,7 @@ export const updateSettings = async (patch) => { return (await api.put('/setting
 
 // -- Authentication --
 export const getAuthStatus = async () => (await api.get('/auth/me')).data;
-export const login = async (password) => (await api.post('/auth/login', { password })).data;
+export const login = async (username, password) => (await api.post('/auth/login', { username, password })).data;
 export const logout = async () => (await api.post('/auth/logout')).data;
 
 // -- Providers --
