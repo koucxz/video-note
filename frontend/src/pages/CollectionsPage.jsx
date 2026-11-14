@@ -13,7 +13,6 @@ import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
-import { OverflowTooltip } from "../components/OverflowTooltip"
 import { Separator } from "../components/ui/separator"
 import {
   Dialog,
@@ -209,11 +208,12 @@ export default function CollectionsPage() {
                       key={n.task_id}
                       className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
                     >
-                      <OverflowTooltip
+                      <span
                         className="flex-1 cursor-pointer truncate text-sm"
                         onClick={() => navigate("/note/" + n.task_id)}
-                        text={n.videoName}
-                      />
+                      >
+                        {n.videoName}
+                      </span>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -266,7 +266,9 @@ export default function CollectionsPage() {
                           key={n.task_id}
                           className="flex items-center gap-2"
                         >
-                          <OverflowTooltip className="flex-1 truncate text-xs text-muted-foreground" text={n.videoName} />
+                          <span className="flex-1 truncate text-xs text-muted-foreground">
+                            {n.videoName}
+                          </span>
                           <input type="checkbox" checked={selectedToAdd.has(n.task_id)} onChange={() => setSelectedToAdd(prev => { const next = new Set(prev); next.has(n.task_id) ? next.delete(n.task_id) : next.add(n.task_id); return next; })} className="h-3.5 w-3.5 rounded accent-primary" />
                         </div>
                       ))}

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import {
   Trash2, RefreshCw, Loader2, Clock, CheckCircle2, XCircle,
   Search, Download, CheckSquare, Square,
-  MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play,
+  MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play, Pencil,
 } from "lucide-react"
 import { downloadNoteMd, downloadNotePdf, downloadNotesZip } from "../api/client"
 import { useTaskStore } from "../stores/taskStore"
@@ -16,7 +16,6 @@ import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu"
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "../components/ui/tooltip"
-import { OverflowTooltip } from "../components/OverflowTooltip"
 import { cn } from "../lib/utils"
 
 const statusConfig = {
@@ -31,7 +30,7 @@ function HistoryPage() {
   const {
     tasks, loading, page, totalPages, total, statusFilter, search, selected,
     setFilter, toggleSelect, selectAll, clearSelection, fetchTasks,
-    retryTask, deleteTask, deleteSelected, pauseTask, resumeTask, filteredTasks,
+    retryTask, deleteTask, deleteSelected, pauseTask, resumeTask, renameTask, filteredTasks,
     patchTask,
   } = useTaskStore()
   const [downloadFormat, setDownloadFormat] = useState("md")
@@ -74,6 +73,14 @@ function HistoryPage() {
       if (task.status === "paused") await resumeTask(task.task_id)
       else await pauseTask(task.task_id)
     } catch { /* ignore */ }
+  }
+
+  const handleRename = async (e, task) => {
+    e?.stopPropagation()
+    const name = window.prompt(t('history.renamePrompt'), task.videoName || '')
+    const trimmed = name?.trim()
+    if (!trimmed || trimmed === task.videoName) return
+    try { await renameTask(task.task_id, trimmed) } catch { alert(t('history.renameFailed')) }
   }
 
   const handleBatchZip = async () => {
@@ -183,12 +190,8 @@ function HistoryPage() {
                             <Icon className={cn("h-4 w-4", sc.color, item.status === "processing" && "animate-spin")} />
                           </div>
                           <div className="min-w-0">
-                            <OverflowTooltip as="p" className="truncate font-medium" text={item.videoName} />
-                            {item.video_url && (
-                              <OverflowTooltip as="p" className="truncate text-xs text-muted-foreground" text={item.video_url}>
-                                <ExternalLink className="mr-1 inline h-3 w-3" />{item.video_url}
-                              </OverflowTooltip>
-                            )}
+                            <p className="truncate font-medium">{item.videoName}</p>
+                            {item.video_url && <p className="truncate text-xs text-muted-foreground"><ExternalLink className="mr-1 inline h-3 w-3" />{item.video_url}</p>}
                           </div>
                         </div>
                       </td>
@@ -204,10 +207,8 @@ function HistoryPage() {
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {canView && (<>
-                                <DropdownMenuItem onClick={e => { e.stopPropagation(); downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md") }}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem>
-                                <DropdownMenuItem onClick={e => { e.stopPropagation(); downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf") }}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem>
-                              </>)}
+                              {canView && (<><DropdownMenuItem onClick={() => downloadNoteMd(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".md")}><Download className="mr-2 h-4 w-4" />MD</DropdownMenuItem><DropdownMenuItem onClick={() => downloadNotePdf(item.task_id, (item.videoName || "note").replace(/\.[^.]+$/, "") + ".pdf")}><Download className="mr-2 h-4 w-4" />PDF</DropdownMenuItem></>)}
+                              <DropdownMenuItem onClick={e => handleRename(e, item)}><Pencil className="mr-2 h-4 w-4" />{t('history.rename')}</DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={e => handleDelete(e, item.task_id)}><Trash2 className="mr-2 h-4 w-4" />{t('common.delete')}</DropdownMenuItem>
                             </DropdownMenuContent>

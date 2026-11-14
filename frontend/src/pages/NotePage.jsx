@@ -2,16 +2,14 @@ import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   Download, Loader2, Copy, Check, CheckCircle2, FileText, Search, Pencil,
-  Sparkles, Save, X, Brain, History, RotateCcw, Trash2, RefreshCw,
+  Sparkles, Save, X, Brain, History, RotateCcw, Trash2,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { downloadNotePdf, downloadNoteWord, downloadNoteHtml, getHistoryAll, regenerateTask } from "../api/client"
+import { downloadNotePdf, downloadNoteWord, downloadNoteHtml, getHistoryAll } from "../api/client"
 import { useNoteStore } from "../stores/noteStore"
 import { useNoteStyles } from "../hooks/useNoteStyles"
 import { useLang } from "../context/LangContext"
-import { useToast } from "../context/ToastContext"
-import { OverflowTooltip } from "../components/OverflowTooltip"
 
 import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
@@ -27,7 +25,6 @@ function NotePage() {
   const { taskId } = useParams()
   const navigate = useNavigate()
   const { t } = useLang()
-  const toast = useToast()
   const { styles: noteStyles, loading: stylesLoading, error: stylesError } = useNoteStyles()
   const {
     note, versions, loading, editMode, editContent, editSaving,
@@ -36,10 +33,6 @@ function NotePage() {
     revertVersion, deleteVersion, toggle,
   } = useNoteStore()
   const [polishExtra, setPolishExtra] = useState("")
-  const [showRegen, setShowRegen] = useState(false)
-  const [regenLang, setRegenLang] = useState("en")
-  const [regenStyle, setRegenStyle] = useState(null)
-  const [regenBusy, setRegenBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [notes, setNotes] = useState([])
   const [search, setSearch] = useState("")
@@ -57,34 +50,6 @@ function NotePage() {
   }, [search])
 
   useEffect(() => { loadNote(taskId) }, [taskId])
-
-  // 打开笔记时默认选中「另一种语言」，避免用户误选成当前语言
-  useEffect(() => {
-    if (!note) return
-    setRegenLang(note.language === "zh" ? "en" : "zh")
-    setRegenStyle(note.note_style || null)
-  }, [note?.task_id, note?.language, note?.note_style])
-
-  const handleRegenerate = async () => {
-    if (!note || regenBusy) return
-    setRegenBusy(true)
-    const langLabel = t(regenLang === "zh" ? 'language.chinese' : 'language.english')
-    try {
-      const res = await regenerateTask(note.task_id, { language: regenLang, note_style: regenStyle })
-      setShowRegen(false)
-      if (res.already_completed) {
-        toast.info(t('note.regenExists', { lang: langLabel }))
-        navigate(`/note/${res.task_id}`)
-      } else {
-        toast.success(t('note.regenStarted', { lang: langLabel }))
-        navigate(`/processing/${res.task_id}`)
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || t('note.regenFailed'))
-    } finally {
-      setRegenBusy(false)
-    }
-  }
 
   const handleSaveEdit = async () => {
     try { await saveEdit(taskId) }
@@ -143,7 +108,7 @@ function NotePage() {
                   className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
                     item.task_id === taskId ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted")}>
                   <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", item.task_id === taskId ? "text-primary" : "text-emerald-500")} />
-                  <OverflowTooltip className="truncate" text={item.videoName} />
+                  <span className="truncate">{item.videoName}</span>
                 </button>
               ))}
             </div>
@@ -160,7 +125,6 @@ function NotePage() {
                 <Button variant="ghost" size="sm" onClick={() => navigate("/flashcards/" + note.task_id)}><Brain className="mr-1.5 h-4 w-4" />{t('note.cards')}</Button>
                 <Button variant="ghost" size="sm" onClick={startEdit}><Pencil className="mr-1.5 h-4 w-4" />{t('note.edit')}</Button>
                 <Button variant="ghost" size="sm" onClick={() => toggle("showPolish")} disabled={polishing}>{polishing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}{t('note.polish')}</Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowRegen(v => !v)} disabled={regenBusy}>{regenBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}{t('note.regenerate')}</Button>
                 <Separator orientation="vertical" className="mx-1 h-6" />
                 <Button variant="outline" size="sm" onClick={handleCopy}>{copied ? <Check className="mr-1.5 h-4 w-4" /> : <Copy className="mr-1.5 h-4 w-4" />}{copied ? t('common.copied') : t('common.copy')}</Button>
                 <Button variant="ghost" size="sm" onClick={() => downloadNoteWord(note.task_id, `${baseFilename}.docx`)}><FileText className="mr-1.5 h-4 w-4" />Word</Button>
@@ -204,39 +168,6 @@ function NotePage() {
                 {stylesLoading && <p className="text-xs text-muted-foreground">{t('noteStyle.loading')}</p>}
                 {stylesError && <p className="text-xs text-destructive">{t('noteStyle.unavailable')}</p>}
                 <Input value={polishExtra} onChange={e => setPolishExtra(e.target.value)} placeholder={t('note.extraInstructions')} className="text-sm" />
-              </CardContent></Card>
-            )}
-
-            {showRegen && (
-              <Card className="mb-4"><CardContent className="space-y-3 p-4">
-                <div>
-                  <Label className="text-sm font-semibold">{t('note.regenTitle')}</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">{t('note.regenHint')}</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {["zh", "en"].map(l => (
-                    <Button key={l} size="sm" variant={regenLang === l ? "default" : "outline"}
-                      onClick={() => setRegenLang(l)} disabled={regenBusy}>
-                      {t(l === "zh" ? 'language.chinese' : 'language.english')}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {noteStyles.map(id => (
-                    <Button key={id} size="sm" variant={regenStyle === id ? "default" : "outline"}
-                      onClick={() => setRegenStyle(id)} disabled={regenBusy || stylesLoading || !!stylesError}>
-                      {t('noteStyle.' + id)}
-                    </Button>
-                  ))}
-                </div>
-                {stylesError && <p className="text-xs text-destructive">{t('noteStyle.unavailable')}</p>}
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={handleRegenerate} disabled={regenBusy || !regenStyle}>
-                    {regenBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
-                    {t('note.regenStart')}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowRegen(false)} disabled={regenBusy}>{t('common.cancel')}</Button>
-                </div>
               </CardContent></Card>
             )}
 

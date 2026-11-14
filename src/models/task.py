@@ -46,3 +46,6 @@ class Task:
     error_kind: str = "unknown"
     processing_overrides: dict = field(default_factory=dict)
     total_tokens: int = 0
+    # Optional user-facing name. Keep the source filename immutable so a
+    # renamed note can still be matched to the uploaded video on disk.
+    display_name: str = ""

@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import {
   getHistory, getTaskStatus, retryTask, cancelTask, deleteTask, deleteTasks,
-  pauseTask, resumeTask,
+  pauseTask, resumeTask, renameTask,
 } from "../api/client"
 
 export const useTaskStore = create((set, get) => ({
@@ -77,6 +77,11 @@ export const useTaskStore = create((set, get) => ({
   resumeTask: async (taskId) => {
     await resumeTask(taskId)
     get().fetchTasks()
+  },
+
+  renameTask: async (taskId, name) => {
+    const result = await renameTask(taskId, name)
+    set((s) => ({ tasks: s.tasks.map(t => t.task_id === taskId ? { ...t, videoName: result.name } : t) }))
   },
 
   // Patch a single task in the list (for WebSocket real-time updates)

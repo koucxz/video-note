@@ -53,6 +53,17 @@ class TestCheckpointManager:
         assert result["status"] == "failed"
         assert result["error_kind"] == "api"
 
+    def test_renamed_display_name_survives_task_save(self, checkpoint):
+        from src.models.task import Task
+        task = Task(id="t-rename", video_hash="rename", original_filename="source.mp4", video_path="/tmp/source.mp4")
+        checkpoint.save_task(task)
+        checkpoint.update_task("t-rename", display_name="我的笔记")
+
+        # A retry/resume may save the original in-memory task again.
+        checkpoint.save_task(task)
+        result = checkpoint.get_task("t-rename")
+        assert result["display_name"] == "我的笔记"
+
     def test_delete_task(self, checkpoint):
         from src.models.task import Task
         task = Task(id="t-del", video_hash="x", original_filename="d.mp4", video_path="/d.mp4")
