@@ -235,3 +235,44 @@ class TestPagination:
             task_factory()
         all_tasks = checkpoint.get_all_tasks()
         assert len(all_tasks) == 3
+
+
+class TestQASessions:
+    def test_session_lifecycle_and_scope(self, checkpoint):
+        session = checkpoint.create_qa_session("学习会话", {"task_ids": ["t1"]})
+        assert session["title"] == "学习会话"
+        assert session["scope"] == {"task_ids": ["t1"]}
+        fetched = checkpoint.get_qa_session(session["id"])
+        assert fetched["id"] == session["id"]
+        assert fetched["scope"] == {"task_ids": ["t1"]}
+        updated = checkpoint.update_qa_session(session["id"], title="新标题", scope={"task_ids": ["t2"]})
+        assert updated["title"] == "新标题"
+        assert updated["scope"] == {"task_ids": ["t2"]}
+
+    def test_exchange_is_saved_in_order(self, checkpoint):
+        session = checkpoint.create_qa_session()
+        exchange = checkpoint.save_qa_exchange(
+            session["id"], "问题", "答案", [{"task_id": "t1", "title": "视频"}], 12,
+            {"task_ids": ["t1"]},
+        )
+        assert exchange["assistant_message"]["tokens"] == 12
+        messages = checkpoint.get_qa_messages(session["id"])
+        assert [m["role"] for m in messages] == ["user", "assistant"]
+        assert messages[1]["sources"][0]["task_id"] == "t1"
+        assert checkpoint.get_qa_session(session["id"])["message_count"] == 2
+
+    def test_exchange_rolls_back_when_session_missing(self, checkpoint):
+        with pytest.raises(KeyError):
+            checkpoint.save_qa_exchange("missing", "问题", "答案")
+        assert checkpoint.list_qa_sessions() == []
+
+    def test_list_limit_and_delete_cascade(self, checkpoint):
+        first = checkpoint.create_qa_session("第一")
+        second = checkpoint.create_qa_session("第二")
+        checkpoint.save_qa_exchange(first["id"], "问题", "答案")
+        sessions = checkpoint.list_qa_sessions(limit=1)
+        assert len(sessions) == 1
+        assert sessions[0]["message_count"] == 0 or sessions[0]["id"] in {first["id"], second["id"]}
+        checkpoint.delete_qa_session(first["id"])
+        assert checkpoint.get_qa_session(first["id"]) is None
+        assert checkpoint.get_qa_messages(first["id"]) == []

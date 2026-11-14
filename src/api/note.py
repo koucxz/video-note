@@ -1,6 +1,7 @@
 """Note API - multi-version notes, editing, polish, flashcards, RAG Q&A."""
 import io
 import json
+import logging
 import re
 import zipfile
 from pathlib import Path
@@ -11,6 +12,21 @@ from ..core.engine import get_engine
 from ..services.ai_service import DEFAULT_NOTE_STYLE, NOTE_STYLE_IDS, VALID_NOTE_STYLES
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _display_name(task: dict) -> str:
+    return task.get("display_name") or task.get("original_filename", "")
+
+
+def _refresh_note_vector(engine, task_id: str, content: str) -> None:
+    vector = getattr(engine, "vector", None)
+    if vector is None:
+        return
+    try:
+        vector.index_note(task_id, content)
+    except Exception as exc:
+        logger.warning("Failed to refresh vector index for %s: %s", task_id[:8], exc)
 
 
 def _safe_filename(name: str, ext: str) -> str:
@@ -78,7 +94,7 @@ async def get_history(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le
     for t in result["items"]:
         item = {
             "task_id": t["id"],
-            "videoName": t["original_filename"],
+            "videoName": _display_name(t),
             "status": t["status"],
             "createdAt": t["created_at"],
             "progress": t["progress"],
@@ -109,7 +125,7 @@ async def download_note_md(task_id: str):
         raise HTTPException(404, "Note not found")
     return FileResponse(
         task["note_path"], media_type="text/markdown",
-        filename=f"{Path(task['original_filename']).stem}.md")
+        filename=f"{Path(_display_name(task)).stem}.md")
 
 
 @router.get("/api/note/{task_id}/content", tags=["notes"])
@@ -126,9 +142,7 @@ async def get_note_content(task_id: str):
         content = Path(task["note_path"]).read_text(encoding="utf-8")
     else:
         raise HTTPException(404, "Note not found or not yet generated")
-    return {"task_id": task_id, "filename": task["original_filename"], "content": content,
-            "language": task.get("language") or "zh",
-            "note_style": task.get("note_style") or "standard"}
+    return {"task_id": task_id, "filename": _display_name(task), "content": content}
 
 
 @router.get("/api/note/{task_id}/versions", tags=["notes"])
@@ -158,6 +172,7 @@ async def edit_note(task_id: str, body: dict = {}):
     if not content:
         raise HTTPException(400, "Content cannot be empty")
     version = engine.checkpoint.add_note_version(task_id, content, source="manual")
+    _refresh_note_vector(engine, task_id, content)
     return {"task_id": task_id, "version": version}
 
 
@@ -200,6 +215,7 @@ async def polish_note(task_id: str, body: dict = {}):
         note_text, tokens = await engine.ai.generate_note(outline, prompt, language, style)
         version = engine.checkpoint.add_note_version(
             task_id, note_text, source="repolish", style=style, model_name=engine.ai.model)
+        _refresh_note_vector(engine, task_id, note_text)
         # Update token count
         engine.checkpoint.update_task(task_id, total_tokens=task.get("total_tokens", 0) + tokens)
         return {"task_id": task_id, "version": version}
@@ -213,6 +229,11 @@ async def delete_note_version(task_id: str, version_id: str):
     ok = engine.checkpoint.delete_note_version(task_id, version_id)
     if not ok:
         raise HTTPException(400, "Cannot delete the last version")
+    remaining = engine.checkpoint.get_note_versions(task_id)
+    if remaining:
+        latest = engine.checkpoint.get_note_version(task_id, remaining[-1]["id"])
+        if latest:
+            _refresh_note_vector(engine, task_id, latest.get("content", ""))
     return {"message": "Version deleted"}
 
 
@@ -222,6 +243,7 @@ async def revert_note_version(task_id: str, version_id: str):
     ver = engine.checkpoint.revert_to_version(task_id, version_id)
     if not ver:
         raise HTTPException(404, "Version not found")
+    _refresh_note_vector(engine, task_id, ver.get("content", ""))
     return {"task_id": task_id, "version": ver}
 
 
@@ -239,7 +261,7 @@ async def download_note_pdf(task_id: str):
     if not content:
         raise HTTPException(404, "Note content is empty")
 
-    filename = Path(task["original_filename"]).stem
+    filename = Path(_display_name(task)).stem
     styled_html = _markdown_to_html(content)
     try:
         pdf_bytes = _render_pdf(styled_html)
@@ -269,7 +291,7 @@ async def download_note_word(task_id: str):
     if not content:
         raise HTTPException(404, "Note content is empty")
 
-    filename = Path(task["original_filename"]).stem
+    filename = Path(_display_name(task)).stem
     doc = DocxDocument()
     style = doc.styles["Normal"]
     style.font.name = "Arial"
@@ -311,7 +333,7 @@ async def download_note_html(task_id: str):
     if not content_text:
         raise HTTPException(404, "Note content is empty")
 
-    filename = Path(task["original_filename"]).stem
+    filename = Path(_display_name(task)).stem
     html_body = md_lib.markdown(content_text, extensions=["tables", "fenced_code", "codehilite", "toc"])
     full_html = f"""<!DOCTYPE html>
 <html lang="zh">
@@ -364,7 +386,7 @@ async def download_notes_zip(task_ids: list[str], format: str = "md"):
                 content = Path(task["note_path"]).read_text(encoding="utf-8")
             if not content:
                 continue
-            stem = Path(task["original_filename"]).stem
+            stem = Path(_display_name(task)).stem
             if format == "pdf":
                 try:
                     zf.writestr(f"{stem}.pdf", _render_pdf(_markdown_to_html(content)))
@@ -478,7 +500,7 @@ async def get_collection_notes(col_id: str):
         if task:
             notes.append({
                 "task_id": task["id"],
-                "videoName": task["original_filename"],
+                "videoName": _display_name(task),
                 "status": task["status"],
                 "createdAt": task["created_at"],
                 "note_style": task.get("note_style", ""),
@@ -503,18 +525,125 @@ async def get_favorites():
     return {"favorites": fav_ids}
 
 
-# ── RAG Q&A ──
+# ── RAG chat sessions and Q&A ──
+
+_MAX_RAG_TITLE = 120
+_MAX_RAG_QUESTION = 4000
+_MAX_RAG_HISTORY_ITEM = 4000
+
+
+def _validate_rag_scope(scope):
+    if scope is None:
+        return {}
+    if not isinstance(scope, dict):
+        raise HTTPException(422, "scope must be an object")
+    task_ids = scope.get("task_ids")
+    if task_ids is not None and (not isinstance(task_ids, list) or any(not isinstance(t, str) for t in task_ids)):
+        raise HTTPException(422, "scope.task_ids must be an array of strings")
+    return {"task_ids": task_ids} if task_ids is not None else {}
+
+
+def _validate_rag_body(body: dict) -> tuple[str, list, dict, str | None, bool]:
+    if not isinstance(body, dict):
+        raise HTTPException(422, "Request body must be an object")
+    question = body.get("question", "")
+    if not isinstance(question, str):
+        raise HTTPException(422, "question must be a string")
+    question = question.strip()
+    if not question:
+        raise HTTPException(400, "Question is required")
+    if len(question) > _MAX_RAG_QUESTION:
+        raise HTTPException(422, f"question must be 1-{_MAX_RAG_QUESTION} characters")
+
+    history = body.get("history", [])
+    if not isinstance(history, list) or len(history) > 6:
+        raise HTTPException(422, "history must contain at most 6 messages")
+    valid_history = []
+    for item in history:
+        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
+            raise HTTPException(422, "history messages must have role user or assistant")
+        content = item.get("content", "")
+        if not isinstance(content, str) or not content.strip() or len(content) > _MAX_RAG_HISTORY_ITEM:
+            raise HTTPException(422, f"history content must be 1-{_MAX_RAG_HISTORY_ITEM} characters")
+        valid_history.append({"role": item["role"], "content": content[:_MAX_RAG_HISTORY_ITEM]})
+
+    has_scope = "scope" in body
+    scope = _validate_rag_scope(body.get("scope"))
+    session_id = body.get("session_id")
+    if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+        raise HTTPException(422, "session_id must be a non-empty string")
+    return question, valid_history, scope, session_id.strip() if session_id else None, has_scope
+
+
+@router.get("/api/rag/sessions", tags=["rag"])
+async def list_rag_sessions(limit: int = Query(50, ge=1, le=100)):
+    engine = get_engine()
+    return {"sessions": engine.checkpoint.list_qa_sessions(limit=limit)}
+
+
+@router.post("/api/rag/sessions", tags=["rag"])
+async def create_rag_session(body: dict = {}):
+    if not isinstance(body, dict):
+        raise HTTPException(422, "Request body must be an object")
+    title = body.get("title", "新会话")
+    if not isinstance(title, str):
+        raise HTTPException(422, "title must be a string")
+    title = title.strip()
+    if len(title) > _MAX_RAG_TITLE:
+        raise HTTPException(422, f"title must be at most {_MAX_RAG_TITLE} characters")
+    scope = _validate_rag_scope(body.get("scope", {}))
+    return get_engine().checkpoint.create_qa_session(title or "新会话", scope)
+
+
+@router.get("/api/rag/sessions/{session_id}", tags=["rag"])
+async def get_rag_session(session_id: str):
+    engine = get_engine()
+    session = engine.checkpoint.get_qa_session(session_id)
+    if not session:
+        raise HTTPException(404, "RAG session not found")
+    return {"session": session, "messages": engine.checkpoint.get_qa_messages(session_id)}
+
+
+@router.patch("/api/rag/sessions/{session_id}", tags=["rag"])
+async def rename_rag_session(session_id: str, body: dict = {}):
+    if not isinstance(body, dict) or not isinstance(body.get("title"), str):
+        raise HTTPException(422, "title must be a string")
+    title = body["title"].strip()
+    if not title or len(title) > _MAX_RAG_TITLE:
+        raise HTTPException(422, f"title must be 1-{_MAX_RAG_TITLE} characters")
+    session = get_engine().checkpoint.update_qa_session(session_id, title=title)
+    if not session:
+        raise HTTPException(404, "RAG session not found")
+    return session
+
+
+@router.delete("/api/rag/sessions/{session_id}", tags=["rag"])
+async def delete_rag_session(session_id: str):
+    if not get_engine().checkpoint.delete_qa_session(session_id):
+        raise HTTPException(404, "RAG session not found")
+    return {"message": "RAG session deleted"}
 
 @router.post("/api/rag/ask", tags=["rag"])
 async def rag_ask(body: dict = {}):
     """Ask a question across notes using vector search."""
     engine = get_engine()
-    question = body.get("question", "").strip()
-    if not question:
-        raise HTTPException(400, "Question is required")
-
-    history = body.get("history", [])
-    scope = body.get("scope", {})
+    question, request_history, scope, session_id, has_scope = _validate_rag_body(body)
+    session = None
+    if session_id:
+        session = engine.checkpoint.get_qa_session(session_id)
+        if not session:
+            raise HTTPException(404, "RAG session not found")
+        if has_scope:
+            session = engine.checkpoint.update_qa_session(session_id, scope=scope)
+        else:
+            scope = session.get("scope") or {}
+        persisted = engine.checkpoint.get_qa_messages(session_id)
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in persisted[-6:]
+        ] or request_history
+    else:
+        history = request_history
     task_ids_filter = scope.get("task_ids")
 
     # Use vector search for relevant chunks
@@ -540,7 +669,12 @@ async def rag_ask(body: dict = {}):
             relevant_chunks = vector.search(question, top_k=8, task_ids=task_ids_filter)
 
     if not relevant_chunks:
-        return {"answer": "No notes available for Q&A.", "sources": []}
+        answer = "No notes available for Q&A."
+        if session_id:
+            saved = engine.checkpoint.save_qa_exchange(session_id, question, answer, [], 0, scope)
+            return {"session_id": session_id, "answer": answer, "sources": [], "tokens": 0,
+                    **saved}
+        return {"answer": answer, "sources": []}
 
     # Build context from relevant chunks
     context_parts = []
@@ -548,14 +682,14 @@ async def rag_ask(body: dict = {}):
     seen_tasks = set()
     for i, chunk in enumerate(relevant_chunks):
         task = engine.checkpoint.get_task(chunk["task_id"])
-        title = task.get("original_filename", chunk["task_id"][:8]) if task else chunk["task_id"][:8]
+        title = _display_name(task) if task else chunk["task_id"][:8]
         context_parts.append(f"[Source {i+1}: {title}] (score: {chunk['score']:.2f})\n{chunk['text']}")
         if chunk["task_id"] not in seen_tasks:
             sources.append({"task_id": chunk["task_id"], "title": title, "score": chunk["score"]})
             seen_tasks.add(chunk["task_id"])
 
     context = "\n\n---\n\n".join(context_parts)
-    messages = [{"role": "system", "content": "You are a helpful assistant that answers questions based on video notes. Always cite the source when possible."}]
+    messages = [{"role": "system", "content": "You are a helpful assistant that answers questions based on video notes. Always cite the source when possible. If the excerpts do not support an answer, say so clearly."}]
     for h in history[-6:]:
         messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
     messages.append({"role": "user", "content": f"Based on these note excerpts:\n\n{context[:15000]}\n\nQuestion: {question}"})
@@ -576,6 +710,10 @@ async def rag_ask(body: dict = {}):
             answer = "RAG Q&A not available with current provider."
             total = 0
 
+        if session_id:
+            saved = engine.checkpoint.save_qa_exchange(session_id, question, answer, sources[:5], total, scope)
+            return {"session_id": session_id, "answer": answer, "sources": sources[:5], "tokens": total,
+                    **saved}
         return {"answer": answer, "sources": sources[:5], "tokens": total}
     except Exception as exc:
         raise HTTPException(500, f"RAG Q&A failed: {exc}")

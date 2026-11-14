@@ -254,3 +254,50 @@ class TestRAGAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert "answer" in data
+
+    def test_rag_session_lifecycle(self, client):
+        created = client.post("/api/rag/sessions", json={"title": "Study", "scope": {"task_ids": []}})
+        assert created.status_code == 200
+        session_id = created.json()["id"]
+        listed = client.get("/api/rag/sessions")
+        assert listed.status_code == 200
+        assert any(item["id"] == session_id for item in listed.json()["sessions"])
+        detail = client.get(f"/api/rag/sessions/{session_id}")
+        assert detail.status_code == 200
+        assert detail.json()["messages"] == []
+        renamed = client.patch(f"/api/rag/sessions/{session_id}", json={"title": "Renamed"})
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "Renamed"
+        deleted = client.delete(f"/api/rag/sessions/{session_id}")
+        assert deleted.status_code == 200
+        assert client.get(f"/api/rag/sessions/{session_id}").status_code == 404
+
+    def test_rag_ask_persists_empty_result_exchange(self):
+        import asyncio
+        from src.api.note import rag_ask
+
+        engine = MagicMock()
+        engine.checkpoint.get_qa_session.return_value = {
+            "id": "session-1", "scope": {}, "title": "Chat",
+        }
+        engine.checkpoint.update_qa_session.return_value = engine.checkpoint.get_qa_session.return_value
+        engine.checkpoint.get_qa_messages.return_value = []
+        engine.checkpoint.get_all_tasks.return_value = []
+        engine.checkpoint.save_qa_exchange.return_value = {
+            "user_message": {"role": "user", "content": "hello"},
+            "assistant_message": {"role": "assistant", "content": "No notes available for Q&A."},
+        }
+        vector = MagicMock()
+        vector.search.return_value = []
+        with patch("src.api.note.get_engine", return_value=engine), \
+             patch("src.services.vector_service.get_vector_service", return_value=vector):
+            result = asyncio.run(rag_ask({"question": "hello", "session_id": "session-1", "scope": {}}))
+        assert result["session_id"] == "session-1"
+        assert result["assistant_message"]["content"] == "No notes available for Q&A."
+        engine.checkpoint.save_qa_exchange.assert_called_once()
+
+    def test_rag_ask_rejects_invalid_types_and_limits(self, client):
+        assert client.post("/api/rag/ask", json={"question": 123}).status_code == 422
+        assert client.post("/api/rag/ask", json={"question": "x", "history": "bad"}).status_code == 422
+        assert client.post("/api/rag/ask", json={"question": "x", "scope": {"task_ids": [1]}}).status_code == 422
+        assert client.post("/api/rag/ask", json={"question": "x" * 4001}).status_code == 422

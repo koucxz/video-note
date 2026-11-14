@@ -23,6 +23,7 @@ class CheckpointManager:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+        self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
@@ -36,6 +37,7 @@ class CheckpointManager:
             self.conn.execute(
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, video_hash TEXT, original_filename TEXT,
+                    display_name TEXT DEFAULT '',
                     video_path TEXT, language TEXT DEFAULT 'zh', note_style TEXT DEFAULT 'standard',
                     status TEXT, stage TEXT, progress REAL,
                     created_at TIMESTAMP, updated_at TIMESTAMP, completed_at TIMESTAMP,
@@ -67,12 +69,34 @@ class CheckpointManager:
                 """CREATE TABLE IF NOT EXISTS favorites (
                     task_id TEXT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE)""")
-            for col, default in [("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS qa_sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT '{}',
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL)""")
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS qa_messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                    content TEXT NOT NULL,
+                    sources TEXT NOT NULL DEFAULT '[]',
+                    tokens INTEGER DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES qa_sessions(id) ON DELETE CASCADE)""")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_qa_sessions_updated ON qa_sessions(updated_at DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_qa_messages_session ON qa_messages(session_id, created_at)"
+            )
+            for col, default in [("display_name", ""), ("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
                                   ("processing_overrides", "{}"), ("total_tokens", "0"),
-                                  ("platform", ""), ("video_url", ""), ("model_name", ""),
-                                  ("quick_hash", ""), ("file_size", "0")]:
+                                  ("platform", ""), ("video_url", ""), ("model_name", "")]:
                 try:
-                    col_type = "INTEGER" if col in ("total_tokens", "file_size") else "TEXT"
+                    col_type = "TEXT" if col != "total_tokens" else "INTEGER"
                     self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {col_type} DEFAULT '{default}'")
                 except sqlite3.OperationalError:
                     pass
@@ -101,13 +125,19 @@ class CheckpointManager:
     def save_task(self, task) -> None:
         overrides_json = json.dumps(task.processing_overrides or {}, ensure_ascii=False)
         with self._lock:
+            # ``save_task`` is also used while a task is being retried or
+            # resumed.  Preserve a name set through the rename API when the
+            # in-memory Task object predates that rename.
+            cur = self.conn.execute("SELECT display_name FROM tasks WHERE id = ?", (task.id,))
+            existing = cur.fetchone()
+            display_name = getattr(task, "display_name", "") or (existing[0] if existing else "") or ""
             self.conn.execute(
                 """INSERT OR REPLACE INTO tasks
-                (id, video_hash, original_filename, video_path, language, note_style,
+                (id, video_hash, original_filename, display_name, video_path, language, note_style,
                  status, stage, progress, created_at, updated_at, completed_at,
                  note_path, error, error_kind, processing_overrides, total_tokens)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (task.id, task.video_hash, task.original_filename, task.video_path,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (task.id, task.video_hash, task.original_filename, display_name, task.video_path,
                  task.language, task.note_style, task.status.value, task.stage.value,
                  task.progress, task.created_at, task.updated_at, task.completed_at,
                  task.note_path, task.error, task.error_kind, overrides_json, task.total_tokens))
@@ -150,86 +180,21 @@ class CheckpointManager:
                 "pages": (total + size - 1) // size if size > 0 else 0,
             }
 
-    def find_task_by_hash(self, video_hash: str, language: Optional[str] = None,
-                          note_style: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """按视频 hash 查已完成任务。
-
-        language / note_style 为「精确匹配」条件：只有同语言同风格的任务才算命中，
-        否则同一个视频换个语言重传会错误地拿到上一份笔记。
-        """
-        sql = "SELECT * FROM tasks WHERE video_hash = ? AND status = 'completed'"
-        params: list = [video_hash]
-        if language:
-            sql += " AND language = ?"
-            params.append(language)
-        if note_style:
-            sql += " AND note_style = ?"
-            params.append(note_style)
-        sql += " ORDER BY completed_at DESC LIMIT 1"
-        with self._lock:
-            cur = self.conn.execute(sql, tuple(params))
-            row = cur.fetchone()
-            return self._row_to_dict(cur, row) if row else None
-
-    def other_task_ids_by_hash(self, video_hash: str, exclude_id: str) -> List[str]:
-        """同源视频的其它任务（不看状态）。
-
-        删除任务时用它判断源视频是否还被别的任务引用：换语言/风格重新生成会产生
-        多个任务共用同一个视频文件，只删一个任务不能把文件删掉。
-        """
-        if not video_hash:
-            return []
+    def find_task_by_hash(self, video_hash: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             cur = self.conn.execute(
-                "SELECT id FROM tasks WHERE video_hash = ? AND id <> ?",
-                (video_hash, exclude_id))
-            return [row[0] for row in cur.fetchall()]
-
-    def find_any_task_by_hash(self, video_hash: str) -> Optional[Dict[str, Any]]:
-        """按视频 hash 找任意状态的最新任务（用于复用服务器上已有的源视频）。"""
-        if not video_hash:
-            return None
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE video_hash = ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM tasks WHERE video_hash = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1",
                 (video_hash,))
             row = cur.fetchone()
             return self._row_to_dict(cur, row) if row else None
-
-    def find_any_tasks_by_hash(self, video_hash: str) -> List[Dict[str, Any]]:
-        """同一源视频的全部任务（不区分状态）。"""
-        if not video_hash:
-            return []
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE video_hash = ? ORDER BY created_at DESC",
-                (video_hash,))
-            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
-
-    def find_tasks_by_filename(self, filename: str) -> List[Dict[str, Any]]:
-        """按原始文件名找候选任务（上传前快速去重时逐个比对大小与快速指纹）。"""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE original_filename = ? ORDER BY created_at DESC",
-                (filename,))
-            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
-
-    def find_tasks_by_size(self, size: int) -> List[Dict[str, Any]]:
-        """按文件字节数找候选任务（文件被改名后仍能命中上传前去重）。"""
-        if not size or size <= 0:
-            return []
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE file_size = ? ORDER BY created_at DESC", (int(size),))
-            return [self._row_to_dict(cur, row) for row in cur.fetchall()]
 
     def update_task(self, task_id: str, **kwargs) -> None:
         if not kwargs:
             return
-        allowed = {"video_hash", "original_filename", "video_path", "language", "note_style",
+        allowed = {"video_hash", "original_filename", "display_name", "video_path", "language", "note_style",
                     "status", "stage", "progress", "created_at", "updated_at", "completed_at",
                     "note_path", "error", "error_kind", "processing_overrides", "total_tokens",
-                    "platform", "video_url", "model_name", "quick_hash", "file_size"}
+                    "platform", "video_url", "model_name"}
         safe = {}
         for k, v in kwargs.items():
             if k not in allowed:
@@ -259,6 +224,197 @@ class CheckpointManager:
                 "error_kind='interrupted', updated_at=? WHERE status IN ('processing','pending')",
                 (datetime.now(),))
             return cur.rowcount or 0
+
+    # ── RAG chat sessions ──
+
+    def create_qa_session(self, title: str = "新会话", scope: Optional[dict] = None) -> dict:
+        """Create a persisted RAG conversation with its current note scope."""
+        session_id = str(uuid.uuid4())
+        now = datetime.now()
+        title = (title or "新会话").strip()[:120] or "新会话"
+        scope = scope if isinstance(scope, dict) else {}
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO qa_sessions (id, title, scope, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (session_id, title, json.dumps(scope, ensure_ascii=False), now, now),
+            )
+        return {
+            "id": session_id,
+            "title": title,
+            "scope": scope,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "message_count": 0,
+            "preview": "",
+        }
+
+    def get_qa_session(self, session_id: str) -> Optional[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT id, title, scope, created_at, updated_at FROM qa_sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            count_cur = self.conn.execute(
+                "SELECT COUNT(*) FROM qa_messages WHERE session_id = ?", (session_id,)
+            )
+            count_row = count_cur.fetchone()
+            preview_cur = self.conn.execute(
+                """SELECT content FROM qa_messages
+                   WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1""",
+                (session_id,),
+            )
+            preview_row = preview_cur.fetchone()
+        try:
+            scope = json.loads(row[2] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            scope = {}
+        return {
+            "id": row[0],
+            "title": row[1],
+            "scope": scope if isinstance(scope, dict) else {},
+            "created_at": row[3].isoformat() if isinstance(row[3], datetime) else str(row[3]),
+            "updated_at": row[4].isoformat() if isinstance(row[4], datetime) else str(row[4]),
+            "message_count": int(count_row[0] if count_row else 0),
+            "preview": (preview_row[0] if preview_row else "")[:160],
+        }
+
+    def list_qa_sessions(self, limit: int = 50) -> List[dict]:
+        limit = max(1, min(100, int(limit)))
+        with self._lock:
+            cur = self.conn.execute(
+                """SELECT s.id, s.title, s.scope, s.created_at, s.updated_at,
+                          COUNT(m.id) AS message_count,
+                          COALESCE((SELECT m2.content FROM qa_messages m2
+                                    WHERE m2.session_id = s.id
+                                    ORDER BY m2.created_at DESC, m2.rowid DESC LIMIT 1), '') AS preview
+                   FROM qa_sessions s
+                   LEFT JOIN qa_messages m ON m.session_id = s.id
+                   GROUP BY s.id
+                   ORDER BY s.updated_at DESC, s.rowid DESC
+                   LIMIT ?""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        result = []
+        for row in rows:
+            try:
+                scope = json.loads(row[2] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                scope = {}
+            result.append({
+                "id": row[0],
+                "title": row[1],
+                "scope": scope if isinstance(scope, dict) else {},
+                "created_at": row[3].isoformat() if isinstance(row[3], datetime) else str(row[3]),
+                "updated_at": row[4].isoformat() if isinstance(row[4], datetime) else str(row[4]),
+                "message_count": int(row[5] or 0),
+                "preview": (row[6] or "")[:160],
+            })
+        return result
+
+    def update_qa_session(self, session_id: str, title: Optional[str] = None,
+                          scope: Optional[dict] = None) -> Optional[dict]:
+        fields = []
+        values = []
+        if title is not None:
+            clean_title = str(title).strip()[:120] or "新会话"
+            fields.append("title = ?")
+            values.append(clean_title)
+        if scope is not None:
+            fields.append("scope = ?")
+            values.append(json.dumps(scope if isinstance(scope, dict) else {}, ensure_ascii=False))
+        if not fields:
+            return self.get_qa_session(session_id)
+        fields.append("updated_at = ?")
+        values.append(datetime.now())
+        values.append(session_id)
+        with self._lock:
+            cur = self.conn.execute(
+                f"UPDATE qa_sessions SET {', '.join(fields)} WHERE id = ?", values
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_qa_session(session_id)
+
+    def delete_qa_session(self, session_id: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM qa_sessions WHERE id = ?", (session_id,))
+            return bool(cur.rowcount)
+
+    def get_qa_messages(self, session_id: str) -> List[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                """SELECT id, session_id, role, content, sources, tokens, created_at
+                   FROM qa_messages WHERE session_id = ?
+                   ORDER BY created_at, rowid""",
+                (session_id,),
+            )
+            rows = cur.fetchall()
+        result = []
+        for row in rows:
+            try:
+                sources = json.loads(row[4] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                sources = []
+            result.append({
+                "id": row[0],
+                "session_id": row[1],
+                "role": row[2],
+                "content": row[3],
+                "sources": sources if isinstance(sources, list) else [],
+                "tokens": int(row[5] or 0),
+                "created_at": row[6].isoformat() if isinstance(row[6], datetime) else str(row[6]),
+            })
+        return result
+
+    def save_qa_exchange(self, session_id: str, question: str, answer: str,
+                         sources: Optional[list] = None, tokens: int = 0,
+                         scope: Optional[dict] = None) -> dict:
+        """Atomically persist one user question and its assistant answer."""
+        user_id = str(uuid.uuid4())
+        assistant_id = str(uuid.uuid4())
+        now = datetime.now()
+        sources = sources if isinstance(sources, list) else []
+        scope = scope if isinstance(scope, dict) else {}
+        with self._lock:
+            self.conn.execute("BEGIN")
+            try:
+                exists = self.conn.execute(
+                    "SELECT 1 FROM qa_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if not exists:
+                    raise KeyError(f"QA session not found: {session_id}")
+                payload = json.dumps(sources, ensure_ascii=False)
+                self.conn.execute(
+                    """INSERT INTO qa_messages
+                       (id, session_id, role, content, sources, tokens, created_at)
+                       VALUES (?, ?, 'user', ?, '[]', 0, ?)""",
+                    (user_id, session_id, question, now),
+                )
+                self.conn.execute(
+                    """INSERT INTO qa_messages
+                       (id, session_id, role, content, sources, tokens, created_at)
+                       VALUES (?, ?, 'assistant', ?, ?, ?, ?)""",
+                    (assistant_id, session_id, answer, payload, int(tokens or 0), now),
+                )
+                self.conn.execute(
+                    "UPDATE qa_sessions SET scope = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(scope, ensure_ascii=False), now, session_id),
+                )
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+        return {
+            "user_message": {"id": user_id, "session_id": session_id, "role": "user", "content": question,
+                              "sources": [], "tokens": 0, "created_at": now.isoformat()},
+            "assistant_message": {"id": assistant_id, "session_id": session_id, "role": "assistant", "content": answer,
+                                   "sources": sources, "tokens": int(tokens or 0), "created_at": now.isoformat()},
+        }
 
     # ── Note Versions ──
 
