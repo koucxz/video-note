@@ -6,9 +6,9 @@ import { Label } from "../components/ui/label"
 
 export default function LoginPage({ password, setPassword, error, loading, onSubmit }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-10">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.22),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.16),transparent_38%)]" />
-      <Card className="relative w-full max-w-md border-white/10 bg-white/[0.97] shadow-2xl shadow-slate-950/40">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-10">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.08),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.07),transparent_38%)]" />
+      <Card className="relative w-full max-w-md border-slate-200 bg-white shadow-xl shadow-slate-200/70">
         <CardContent className="p-8 sm:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
