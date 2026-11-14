@@ -13,20 +13,27 @@ logger = logging.getLogger(__name__)
 _CHUNK = 1024 * 1024
 
 
+class UploadTooLargeError(ValueError):
+    """Raised when a streamed upload exceeds the configured hard limit."""
+
+
 class FileDeduplicator:
     def __init__(self, upload_dir: str):
         self.upload_dir = Path(upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
 
-    async def process_upload(self, source, filename: str) -> Tuple[str, Path, bool]:
+    async def process_upload(self, source, filename: str, max_bytes: int | None = None) -> Tuple[str, Path, bool]:
         ext = Path(filename).suffix.lower()
         tmp_fd, tmp_path = tempfile.mkstemp(prefix="vn_", suffix=ext or ".bin", dir=str(self.upload_dir))
         os.close(tmp_fd)
         sha = hashlib.sha256()
 
         try:
+            total = 0
             with open(tmp_path, "wb") as out:
                 if isinstance(source, (bytes, bytearray)):
+                    if max_bytes is not None and len(source) > max_bytes:
+                        raise UploadTooLargeError(f"Upload exceeds the {max_bytes} byte limit")
                     sha.update(source)
                     out.write(source)
                 else:
@@ -39,6 +46,9 @@ class FileDeduplicator:
                             chunk = await reader(_CHUNK)
                             if not chunk:
                                 break
+                            total += len(chunk)
+                            if max_bytes is not None and total > max_bytes:
+                                raise UploadTooLargeError(f"Upload exceeds the {max_bytes} byte limit")
                             sha.update(chunk)
                             out.write(chunk)
                     else:
@@ -46,6 +56,9 @@ class FileDeduplicator:
                             chunk = reader(_CHUNK)
                             if not chunk:
                                 break
+                            total += len(chunk)
+                            if max_bytes is not None and total > max_bytes:
+                                raise UploadTooLargeError(f"Upload exceeds the {max_bytes} byte limit")
                             sha.update(chunk)
                             out.write(chunk)
 
