@@ -21,7 +21,12 @@ class TokenBudgetExceeded(RuntimeError):
 
 
 def _today() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    """Budget days roll over at Beijing midnight, whatever TZ the container runs in."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
 
 
 def _env_limit(default: int = DEFAULT_DAILY_TOKEN_LIMIT) -> int:

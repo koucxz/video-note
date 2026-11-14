@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 _JSON_FIELDS = {"processing_overrides"}
 
 
+def _budget_day() -> str:
+    """Token budgets roll over at Beijing midnight, matching the UI wording."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
 class CheckpointManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -600,7 +609,7 @@ class CheckpointManager:
 
     def add_token_usage(self, tokens: int, day: Optional[str] = None) -> int:
         """Add provider-reported tokens to a calendar day and return the new total."""
-        day = day or datetime.now().strftime("%Y-%m-%d")
+        day = day or _budget_day()
         amount = int(tokens or 0)
         with self._lock:
             self.conn.execute(
@@ -613,7 +622,7 @@ class CheckpointManager:
             return int(row[0]) if row else 0
 
     def get_token_usage(self, day: Optional[str] = None) -> dict:
-        day = day or datetime.now().strftime("%Y-%m-%d")
+        day = day or _budget_day()
         with self._lock:
             cur = self.conn.execute(
                 "SELECT tokens, calls FROM token_usage WHERE day = ?", (day,))
