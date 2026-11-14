@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from ..core.engine import get_engine
+from ..core.token_usage import set_limit as set_token_limit, usage_snapshot
 
 router = APIRouter()
 _ALLOW_RUNTIME_PROVIDER_CONFIG = __import__("os").getenv("ALLOW_RUNTIME_PROVIDER_KEYS", "false").lower() in {"1", "true", "yes", "on"}
@@ -49,6 +50,7 @@ async def get_settings():
         "provider_type": cfg.provider.type,
         "provider_model": cfg.provider.model,
         "asr_enabled": cfg.asr.enabled,
+        "daily_token_limit": cfg.budget.daily_token_limit,
     }
 
 
@@ -67,7 +69,19 @@ async def update_settings(body: dict):
         if hasattr(cfg, "language"): cfg.language.default = body["language"]
     if "asr_enabled" in body:
         cfg.asr.enabled = bool(body["asr_enabled"])
+    if "daily_token_limit" in body:
+        try:
+            limit = max(1000, int(body["daily_token_limit"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "daily_token_limit must be a positive integer")
+        cfg.budget.daily_token_limit = set_token_limit(limit) or limit
     return {"message": "Settings updated"}
+
+
+@router.get("/api/usage/tokens", tags=["settings"])
+async def get_token_usage(days: int = 7):
+    """Today's AI token spend plus the daily cap, for the settings page."""
+    return usage_snapshot(max(1, min(30, days)))
 
 
 # Provider management

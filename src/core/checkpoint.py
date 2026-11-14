@@ -92,6 +92,11 @@ class CheckpointManager:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_qa_messages_session ON qa_messages(session_id, created_at)"
             )
+            # Daily token budget: one row per calendar day, incremented from real provider usage.
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS token_usage (
+                    day TEXT PRIMARY KEY, tokens INTEGER NOT NULL DEFAULT 0,
+                    calls INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP)""")
             for col, default in [("display_name", ""), ("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
                                   ("processing_overrides", "{}"), ("total_tokens", "0"),
                                   ("platform", ""), ("video_url", ""), ("model_name", "")]:
@@ -590,6 +595,37 @@ class CheckpointManager:
                 """SELECT id FROM tasks WHERE status = 'completed'
                 AND id NOT IN (SELECT note_id FROM collection_notes)""")
             return [r[0] for r in cur.fetchall()]
+
+    # ── Daily token usage ──
+
+    def add_token_usage(self, tokens: int, day: Optional[str] = None) -> int:
+        """Add provider-reported tokens to a calendar day and return the new total."""
+        day = day or datetime.now().strftime("%Y-%m-%d")
+        amount = int(tokens or 0)
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO token_usage (day, tokens, calls, updated_at) VALUES (?, ?, 1, ?)
+                   ON CONFLICT(day) DO UPDATE SET tokens = tokens + excluded.tokens,
+                   calls = calls + 1, updated_at = excluded.updated_at""",
+                (day, max(0, amount), datetime.now()))
+            cur = self.conn.execute("SELECT tokens FROM token_usage WHERE day = ?", (day,))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+
+    def get_token_usage(self, day: Optional[str] = None) -> dict:
+        day = day or datetime.now().strftime("%Y-%m-%d")
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT tokens, calls FROM token_usage WHERE day = ?", (day,))
+            row = cur.fetchone()
+        return {"day": day, "tokens": int(row[0] or 0) if row else 0, "calls": int(row[1] or 0) if row else 0}
+
+    def get_token_usage_history(self, days: int = 14) -> List[dict]:
+        days = max(1, min(90, int(days)))
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT day, tokens, calls FROM token_usage ORDER BY day DESC LIMIT ?", (days,))
+            return [{"day": r[0], "tokens": int(r[1] or 0), "calls": int(r[2] or 0)} for r in cur.fetchall()]
 
     # ── Favorites ──
 

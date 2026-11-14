@@ -277,7 +277,13 @@
     "healthy": "Healthy",
     "unhealthy": "Unhealthy",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "tokenUsage": "Today's AI usage",
+    "tokenRemaining": "Left",
+    "tokenCalls": "Calls",
+    "tokenLimit": "Daily token limit",
+    "tokenHint": "New tasks and Q&A pause for the rest of the day once the limit is hit, then reset automatically.",
+    "save": "Save"
   },
   "time": {
     "justNow": "Just now",

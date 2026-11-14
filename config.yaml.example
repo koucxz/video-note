@@ -32,6 +32,10 @@ asr:
   model: ${ASR_MODEL:-whisper-1}
   base_url: ${ASR_BASE_URL:-https://api.openai.com/v1}
 
+budget:
+  # 每天允许消耗的 token 总量，跨零点自动重置；到上限后新任务与问答暂停
+  daily_token_limit: ${DAILY_TOKEN_LIMIT:-3000000}
+
 processing:
   segment_duration: 300
   keyframe_interval: 30

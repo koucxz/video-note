@@ -277,7 +277,13 @@
     "healthy": "服务正常",
     "unhealthy": "服务异常",
     "enabled": "已启用",
-    "disabled": "已禁用"
+    "disabled": "已禁用",
+    "tokenUsage": "今日 AI 用量",
+    "tokenRemaining": "剩余",
+    "tokenCalls": "调用次数",
+    "tokenLimit": "每日 token 上限",
+    "tokenHint": "达到上限后当天的新任务与问答会暂停，次日自动恢复。",
+    "save": "保存"
   },
   "time": {
     "justNow": "刚刚",

@@ -230,6 +230,7 @@ export const deleteRagSession = async (sessionId) =>
 
 // -- Settings --
 export const getSettings = async () => { return (await api.get('/settings')).data; };
+export const getTokenUsage = async (days = 7) => { return (await api.get('/usage/tokens', { params: { days } })).data; };
 export const updateSettings = async (patch) => { return (await api.put('/settings', patch)).data; };
 
 // -- Authentication --

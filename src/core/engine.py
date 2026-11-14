@@ -9,6 +9,7 @@ from typing import Optional, Set
 from ..models.task import Task, TaskStatus, ProcessingStage
 from ..core.checkpoint import CheckpointManager
 from ..core.dedup import FileDeduplicator
+from ..core.token_usage import TokenBudgetExceeded, configure as configure_token_budget, ensure_budget
 from ..services.ai_service import AIProvider, OpenAIProvider, AnthropicProvider, classify_error
 from ..services.audio_service import AudioService
 from ..services.video_service import VideoService
@@ -46,6 +47,8 @@ class VideoNoteEngine:
     def __init__(self, config: AppConfig):
         self.config = config
         self.checkpoint = CheckpointManager(config.storage.db_path)
+        # 每日 token 预算：写稿、VLM 抽帧、问答都从这里扣，跨零点自动换天
+        self.budget = configure_token_budget(self.checkpoint, config.budget.daily_token_limit)
         self.dedup = FileDeduplicator(config.storage.upload_dir)
         self.ai = self._init_ai_provider(config)
         self.video_service = VideoService()
@@ -132,6 +135,15 @@ class VideoNoteEngine:
             return await self._process_video_inner(task_id, video_path)
 
     async def _process_video_inner(self, task_id: str, video_path: str) -> str:
+        # 额度用完就别开始：抽帧、转写、写笔记都要花钱，跑到一半被拒更糟
+        try:
+            ensure_budget()
+        except TokenBudgetExceeded as exc:
+            self.checkpoint.update_task(task_id, status=TaskStatus.FAILED.value,
+                error=str(exc), error_kind="quota", updated_at=datetime.now())
+            await self._broadcast(task_id, {"status": "failed", "error": str(exc), "error_kind": "quota"})
+            raise
+
         self.checkpoint.update_task(task_id, status=TaskStatus.PROCESSING.value,
             stage=ProcessingStage.EXTRACTING_AUDIO.value, updated_at=datetime.now())
 

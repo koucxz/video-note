@@ -18,7 +18,7 @@ import { HardDrive,
   EyeOff,
 } from "lucide-react"
 import { useLang } from "../context/LangContext"
-import api, { getProviders, addProvider as apiAddProvider, deleteProvider as apiDeleteProvider, activateProvider, getHistoryAll } from "../api/client"
+import api, { getProviders, addProvider as apiAddProvider, deleteProvider as apiDeleteProvider, activateProvider, getHistoryAll, getTokenUsage, updateSettings } from "../api/client"
 
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
@@ -26,6 +26,7 @@ import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { Separator } from "../components/ui/separator"
+import { Progress } from "../components/ui/progress"
 import { Skeleton } from "../components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import {
@@ -63,6 +64,9 @@ function SettingsPage() {
   const [showAddProvider, setShowAddProvider] = useState(false)
   const [newProvider, setNewProvider] = useState({ name: '', type: 'openai', api_key: '', base_url: '', model: '', vlm_model: '' })
   const [providers, setProviders] = useState([])
+  const [usage, setUsage] = useState(null)
+  const [usageLimit, setUsageLimit] = useState("")
+  const [savingLimit, setSavingLimit] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -117,6 +121,7 @@ function SettingsPage() {
         loadHealth(),
         loadStats(),
         loadModelConfig(),
+        loadUsage(),
       ])
     } finally {
       setLoading(false)
@@ -155,6 +160,30 @@ function SettingsPage() {
       })
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const loadUsage = async () => {
+    try {
+      const data = await getTokenUsage(7)
+      setUsage(data)
+      setUsageLimit(String(data?.limit ?? ""))
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const saveUsageLimit = async () => {
+    const next = Number(usageLimit)
+    if (!Number.isFinite(next) || next < 1000) return
+    setSavingLimit(true)
+    try {
+      await updateSettings({ daily_token_limit: next })
+      await loadUsage()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSavingLimit(false)
     }
   }
 
@@ -445,6 +474,43 @@ function SettingsPage() {
                   >
                     {t('settings.manageStorage')}
                   </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-semibold">{t("settings.tokenUsage")}</h3>
+                  </div>
+                  <p className="text-2xl font-bold text-primary">
+                    {(usage?.tokens ?? 0).toLocaleString()}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      / {(usage?.limit ?? 0).toLocaleString()} token
+                    </span>
+                  </p>
+                  <Progress
+                    className="mt-3 h-2"
+                    value={usage ? Math.min(100, Math.round((usage.tokens / Math.max(1, usage.limit)) * 100)) : 0}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("settings.tokenRemaining")} {(usage?.remaining ?? 0).toLocaleString()} · {t("settings.tokenCalls")} {usage?.calls ?? 0}
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="1000"
+                      step="100000"
+                      value={usageLimit}
+                      onChange={(e) => setUsageLimit(e.target.value)}
+                      className="h-8 w-28 text-xs"
+                      aria-label={t("settings.tokenLimit")}
+                    />
+                    <Button size="sm" variant="outline" disabled={savingLimit} onClick={saveUsageLimit}>
+                      {t("settings.save")}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{t("settings.tokenHint")}</p>
                 </CardContent>
               </Card>
 

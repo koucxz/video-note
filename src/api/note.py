@@ -9,7 +9,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from ..core.engine import get_engine
-from ..services.ai_service import DEFAULT_NOTE_STYLE, NOTE_STYLE_IDS, VALID_NOTE_STYLES
+from ..core.token_usage import TokenBudgetExceeded, ensure_budget, record_tokens
+from ..services.ai_service import DEFAULT_NOTE_STYLE, NOTE_STYLE_IDS, VALID_NOTE_STYLES, _usage_total
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -713,14 +714,15 @@ async def rag_ask(body: dict = {}):
     messages.append({"role": "user", "content": f"Based on these note excerpts:\n\n{context[:15000]}\n\nQuestion: {question}"})
 
     try:
+        ensure_budget(6000)
         if hasattr(engine.ai, '_llm'):
             response = await engine.ai._llm.chat.completions.create(
                 model=engine.ai.model, messages=messages, max_tokens=2048)
             message = response.choices[0].message
             answer = _response_value(message, "content") or ""
             thinking = _extract_thinking(message)
-            tokens = getattr(response, 'usage', None)
-            total = (getattr(tokens, 'total_tokens', 0) or 0) if tokens else 0
+            total = _usage_total(response)
+            record_tokens(total, 6000)
         elif hasattr(engine.ai, '_client'):
             response = await engine.ai._client.messages.create(
                 model=engine.ai.model, max_tokens=2048, messages=messages)
@@ -733,7 +735,8 @@ async def rag_ask(body: dict = {}):
                     answer_parts.append(str(_response_value(block, "text")))
             answer = "".join(answer_parts)
             thinking = "\n".join(thinking_parts).strip()
-            total = (getattr(response.usage, 'input_tokens', 0) or 0) + (getattr(response.usage, 'output_tokens', 0) or 0)
+            total = _usage_total(response)
+            record_tokens(total, 6000)
         else:
             answer = "RAG Q&A not available with current provider."
             thinking = ""
@@ -742,6 +745,8 @@ async def rag_ask(body: dict = {}):
         saved = _persist_rag_exchange(engine, session_id, question, answer, sources[:5], total, scope)
         return {"session_id": saved.get("session_id") or session_id, "answer": answer, "sources": sources[:5],
                 "tokens": total, "thinking": thinking, **saved}
+    except TokenBudgetExceeded as exc:
+        raise HTTPException(429, str(exc))
     except Exception as exc:
         raise HTTPException(500, f"RAG Q&A failed: {exc}")
 

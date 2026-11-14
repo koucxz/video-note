@@ -9,7 +9,20 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
 
+from ..core.token_usage import ensure_budget, record_tokens
+
 logger = logging.getLogger(__name__)
+
+
+def _usage_total(response) -> int:
+    """Tokens billed for one completion, 0 when the provider omits usage."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return 0
+    total = getattr(usage, "total_tokens", None)
+    if total:
+        return int(total)
+    return int(getattr(usage, "input_tokens", 0) or 0) + int(getattr(usage, "output_tokens", 0) or 0)
 
 NOTE_STYLE_PROMPTS = {
     "standard": {
@@ -185,8 +198,10 @@ class OpenAIProvider(AIProvider):
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
             
             try:
+                ensure_budget(4000)
                 response = await self._vlm.chat.completions.create(
                     model=self.vlm_model, messages=[{"role": "user", "content": content}], max_tokens=2048)
+                record_tokens(_usage_total(response), 4000)
                 analysis = response.choices[0].message.content or ""
                 if analysis:
                     all_analyses.append(analysis)
@@ -207,12 +222,13 @@ class OpenAIProvider(AIProvider):
         prompt = (f"Generate an outline from the transcript in {lang_name}.\n\n"
                   f"Transcript:\n{transcript}\n\n"
                   'Return JSON: {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        ensure_budget(3000)
         response = await self._llm.chat.completions.create(
             model=self.model, messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"})
+        total = _usage_total(response)
+        record_tokens(total, 3000)
         text = response.choices[0].message.content or "{}"
-        tokens = getattr(response, 'usage', None)
-        total = (getattr(tokens, 'total_tokens', 0) or 0) if tokens else 0
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
@@ -236,10 +252,11 @@ class OpenAIProvider(AIProvider):
                   f"Style requirement: {style_instruction}\n\n"
                   f"Outline:\n{json.dumps(outline, ensure_ascii=False, indent=2)}\n\n"
                   f"Context:\n{context}\n\nOutput in Markdown format:")
+        ensure_budget(8000)
         response = await self._llm.chat.completions.create(
             model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=8192)
-        tokens = getattr(response, 'usage', None)
-        total = (getattr(tokens, 'total_tokens', 0) or 0) if tokens else 0
+        total = _usage_total(response)
+        record_tokens(total, 8000)
         return response.choices[0].message.content or "", total
 
 
@@ -296,10 +313,12 @@ class AnthropicProvider(AIProvider):
                 })
             content_blocks.append({'type': 'text', 'text': prompt})
             try:
+                ensure_budget(4000)
                 response = await self._client.messages.create(
                     model=self.vlm_model, max_tokens=2048,
                     messages=[{'role': 'user', 'content': content_blocks}],
                 )
+                record_tokens(_usage_total(response), 4000)
                 text = ''.join(b.text for b in response.content if hasattr(b, 'text'))
                 if text:
                     all_analyses.append(text)
@@ -318,10 +337,12 @@ class AnthropicProvider(AIProvider):
         prompt = (f'Generate an outline from the transcript in {lang_name}.\n\n'
                   f'Transcript:\n{transcript}\n\n'
                   'Return ONLY valid JSON (no markdown fences): {"title": str, "sections": [{"heading": str, "points": [str]}]}')
+        ensure_budget(3000)
         response = await self._client.messages.create(
             model=self.model, max_tokens=4096,
             messages=[{'role': 'user', 'content': prompt}],
         )
+        record_tokens(_usage_total(response), 3000)
         text = ''.join(b.text for b in response.content if hasattr(b, 'text')).strip()
         # Strip markdown fences if present
         if text.startswith('`'):
@@ -352,10 +373,11 @@ class AnthropicProvider(AIProvider):
                   f'Style requirement: {style_instruction}\n\n'
                   f'Outline:\n{json.dumps(outline, ensure_ascii=False, indent=2)}\n\n'
                   f'Context:\n{context}\n\nOutput in Markdown format:')
+        ensure_budget(8000)
         response = await self._client.messages.create(
             model=self.model, max_tokens=8192,
             messages=[{'role': 'user', 'content': prompt}],
         )
-        tokens_in = getattr(response.usage, 'input_tokens', 0) or 0
-        tokens_out = getattr(response.usage, 'output_tokens', 0) or 0
-        return ''.join(b.text for b in response.content if hasattr(b, 'text')), tokens_in + tokens_out
+        total = _usage_total(response)
+        record_tokens(total, 8000)
+        return ''.join(b.text for b in response.content if hasattr(b, 'text')), total

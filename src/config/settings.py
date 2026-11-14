@@ -126,6 +126,11 @@ class ProcessingConfig:
 
 
 @dataclass
+class BudgetConfig:
+    daily_token_limit: int = 3_000_000
+
+
+@dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
@@ -138,6 +143,7 @@ class AppConfig:
     asr: ASRConfig = field(default_factory=ASRConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    budget: BudgetConfig = field(default_factory=BudgetConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
 
     def get_model_config(self) -> dict:
@@ -281,6 +287,15 @@ class AppConfig:
                     proc.pop("retry_delay")
             config.processing = ProcessingConfig(**{**config.processing.__dict__, **proc})
 
+        if "budget" in raw and isinstance(raw["budget"], dict):
+            bud = dict(raw["budget"])
+            if "daily_token_limit" in bud:
+                try:
+                    bud["daily_token_limit"] = int(bud["daily_token_limit"])
+                except (TypeError, ValueError):
+                    bud.pop("daily_token_limit")
+            config.budget = BudgetConfig(**{**config.budget.__dict__, **bud})
+
         if "server" in raw and isinstance(raw["server"], dict):
             srv = dict(raw["server"])
             if "port" in srv:
@@ -306,6 +321,13 @@ class AppConfig:
             asr_env = os.getenv("ASR_ENABLED")
             if asr_env is not None:
                 config.asr.enabled = asr_env.strip().lower() in {"1", "true", "yes", "on"}
+
+            daily_tokens = os.getenv("DAILY_TOKEN_LIMIT")
+            if daily_tokens:
+                try:
+                    config.budget.daily_token_limit = max(1, int(daily_tokens))
+                except ValueError:
+                    pass
 
             max_conc = os.getenv("MAX_CONCURRENT_TASKS")
             if max_conc:
