@@ -63,7 +63,7 @@ export default function RAGPage() {
   const [typingId, setTypingId] = useState(null)
   const [sessionError, setSessionError] = useState("")
   const typingTimer = useRef(null)
-  const bottomRef = useRef(null)
+  const messagesScrollRef = useRef(null)
   const restoreScrollRef = useRef(false)
 
   const resetDraft = () => {
@@ -115,10 +115,14 @@ export default function RAGPage() {
   }, [])
 
   useEffect(() => {
-    const target = bottomRef.current
-    if (!target) return
+    const container = messagesScrollRef.current
+    if (!container) return
     const behavior = restoreScrollRef.current ? "auto" : "smooth"
-    target.scrollIntoView({ behavior })
+    if (behavior === "auto") {
+      container.scrollTop = container.scrollHeight
+    } else {
+      container.scrollTo({ top: container.scrollHeight, behavior })
+    }
     restoreScrollRef.current = false
   }, [messages])
 
@@ -271,9 +275,9 @@ export default function RAGPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
-      <aside className="hidden w-80 shrink-0 border-r bg-background md:block">
-        <div className="sticky top-14 flex h-[calc(100vh-3.5rem)] flex-col p-3">
+    <div className="flex h-[calc(100vh-6.5rem)] min-h-0 overflow-hidden">
+      <aside className="hidden w-80 min-h-0 shrink-0 border-r bg-background md:block">
+        <div className="flex h-full min-h-0 flex-col p-3">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold">{t("rag.sessions")}</h3>
             <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={handleNewSession} disabled={loading || !!typingId}>
@@ -319,8 +323,8 @@ export default function RAGPage() {
         </div>
       </aside>
 
-      <div className="flex flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div ref={messagesScrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10"><BookOpen className="h-8 w-8 text-primary" /></div>
@@ -345,11 +349,11 @@ export default function RAGPage() {
                 </div>
               ))}
               {loading && <ThinkingIndicator step={thinkingStep} t={t} />}
-              <div ref={bottomRef} />
+              <div aria-hidden="true" />
             </div>
           )}
         </div>
-        <div className="border-t p-4">
+        <div className="shrink-0 border-t p-4">
           <div className="mx-auto max-w-3xl">
             <div className="flex gap-2">
               <Input value={input} onChange={event => setInput(event.target.value)} onKeyDown={handleKeyDown} placeholder={t("rag.placeholder")} disabled={loading || !!typingId} className="flex-1" />

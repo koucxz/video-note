@@ -1,4 +1,6 @@
 ﻿import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { useEffect } from "react"
+import { useLocation } from "react-router-dom"
 import { LangProvider } from "./context/LangContext"
 import { ToastProvider, useToast } from "./context/ToastContext"
 import { setToastHandler } from "./api/client"
@@ -20,16 +22,27 @@ function ToastConnector() {
   return null
 }
 
+function ScrollToTop() {
+  const location = useLocation()
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" })
+  }, [location.pathname, location.search])
+
+  return null
+}
+
 function App() {
   return (
     <ToastProvider>
       <LangProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <AuthGate>
             <div className="relative flex min-h-screen flex-col">
               <Header />
-              <main className="flex-1">
-                <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+              <main className="min-h-0 flex-1">
+                <div className="mx-auto min-h-0 w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
                   <ErrorBoundary>
                     <Routes>
                       <Route path="/" element={<UploadPage />} />
