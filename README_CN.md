@@ -23,10 +23,6 @@
 - 任务并发控制，支持同时处理多个视频
 - 六种笔记风格：标准、详细、精简、行动清单、学术、创意
 
-## 项目演示
-
-![VideoNote 核心业务流程：选择笔记风格、生成笔记、闪卡及答案](screenshots/videonote-workflow.gif)
-
 ## 功能特性
 
 | 模块 | 说明 |
@@ -43,6 +39,7 @@
 | **存储管理** | 查看上传文件列表、绝对路径、占用空间，支持清理 |
 | **模型配置** | 在线切换 LLM / VLM / ASR 模型，支持 OpenAI 和 Anthropic 协议 |
 | **实时进度** | WebSocket 推送处理进度，无需轮询 |
+| **笔记问答会话** | 参考 NotebookLM 的会话列表，持久化问题、回答、来源和当前知识范围，支持新建、切换、重命名、删除 |
 | **多语言界面** | 中英文一键切换 |
 
 ## 快速开始
@@ -60,6 +57,8 @@ docker compose up --build -d
 
 - 前端：http://localhost:3000
 - 后端 API：http://localhost:8000/api/docs
+
+生产部署请使用服务器端 Key、登录鉴权和 Caddy HTTPS 入口，详见 [`docs/deployment.md`](./docs/deployment.md)。不要将真实 API Key 写入 `config.yaml`、前端代码或 Git。
 
 ### 方式二：源码部署
 
@@ -160,7 +159,7 @@ MAX_CONCURRENT_TASKS=2
 | **后端** | Python 3.11+ · FastAPI · SQLite · FFmpeg · OpenAI SDK · Anthropic SDK |
 | **前端** | React 19 · Vite · Lucide Icons · axios |
 | **部署** | Docker / docker-compose · Nginx（WebSocket 代理） |
-| **AI** | OpenAI 兼容协议 · Anthropic Claude · VLM 视觉分析 · 可选 ASR |
+| **AI** | OpenAI 兼容协议 · Anthropic Claude · VLM 视觉分析 · 可选 ASR · SiliconFlow BGE-M3 Embedding |
 
 ## 依赖说明
 
