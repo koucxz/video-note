@@ -38,6 +38,9 @@
     "chinese": "中文",
     "english": "English"
   },
+  "auth": {
+    "sessionExpired": "登录状态已失效，请重新登录"
+  },
   "header": {
     "upload": "上传",
     "history": "记录",

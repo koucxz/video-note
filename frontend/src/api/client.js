@@ -9,6 +9,49 @@ const api = axios.create({
 let _toast = null
 export function setToastHandler(t) { _toast = t }
 
+let _authFailureSignaled = false
+const _noticeTimes = new Map()
+const NOTICE_DEDUPE_MS = 2500
+
+export function resetAuthFailure() {
+  _authFailureSignaled = false
+}
+
+const errorMessage = (error) => {
+  let msg = error.response?.data?.detail || error.response?.data?.message || error.message || 'Unknown error'
+  if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join('; ')
+  if (typeof msg === 'object') msg = JSON.stringify(msg)
+  return String(msg)
+}
+
+const isAuthEndpoint = (url = '') => /\/auth\/(me|login|logout)(?:\?|$)/.test(url)
+
+const signalAuthFailure = () => {
+  if (_authFailureSignaled) return
+  _authFailureSignaled = true
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('vn-unauthorized', { detail: { expired: true } }))
+  }
+}
+
+const notifyErrorOnce = (error) => {
+  if (!_toast || error.response?.status === 404) return
+  const status = error.response?.status
+  const msg = errorMessage(error)
+  const key = `${status || 'network'}:${msg}`
+  const now = Date.now()
+  const previous = _noticeTimes.get(key) || 0
+  if (now - previous < NOTICE_DEDUPE_MS) return
+  _noticeTimes.set(key, now)
+  for (const [noticeKey, timestamp] of _noticeTimes) {
+    if (now - timestamp > NOTICE_DEDUPE_MS * 2) _noticeTimes.delete(noticeKey)
+  }
+  if (status >= 500) _toast.error(msg, 'Server Error')
+  else if (status === 429) _toast.error(msg, 'Rate Limited')
+  else if (status >= 400) _toast.info(msg)
+  else if (!error.response) _toast.error('Network unreachable', 'Connection Error')
+}
+
 const readCookie = (name) => document.cookie
   .split('; ')
   .find((row) => row.startsWith(name + '='))
@@ -26,34 +69,47 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   response => response,
   async error => {
-    let msg = error.response?.data?.detail || error.response?.data?.message || error.message || 'Unknown error'
-    if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join('; ')
-    if (typeof msg === 'object') msg = JSON.stringify(msg)
-    msg = String(msg)
+    const msg = errorMessage(error)
     const status = error.response?.status
     const original = error.config
+    const suppressNotice = Boolean(original?._vnSuppressErrorNotice)
+
+    const authRequired = msg === 'Authentication required' || (status === 401 && !isAuthEndpoint(original?.url))
+    if (authRequired) {
+      signalAuthFailure()
+      return Promise.reject(error)
+    }
+
     if (
       status === 403 &&
       msg === 'CSRF validation failed' &&
       original &&
       !original._csrfRetried &&
-      !original.url?.endsWith('/auth/me') &&
-      !original.url?.endsWith('/auth/login')
+      !isAuthEndpoint(original.url)
     ) {
       original._csrfRetried = true
+      original._vnSuppressErrorNotice = true
       try {
-        await api.get('/auth/me')
-        return api.request(original)
-      } catch {
-        // Fall through to the normal error handling below.
+        const auth = await api.get('/auth/me')
+        if (auth.data?.authenticated === false) {
+          signalAuthFailure()
+          return Promise.reject(error)
+        }
+        return await api.request(original)
+      } catch (retryError) {
+        const retryStatus = retryError.response?.status
+        if (retryStatus === 401 || retryStatus === 403) signalAuthFailure()
+        else notifyErrorOnce(retryError)
+        return Promise.reject(retryError)
       }
     }
-    if (_toast && status !== 404) {
-      if (status >= 500) _toast.error(msg, 'Server Error')
-      else if (status === 429) _toast.error(msg, 'Rate Limited')
-      else if (status >= 400) _toast.info(msg)
-      else if (!error.response) _toast.error('Network unreachable', 'Connection Error')
+
+    if (status === 403 && msg === 'CSRF validation failed' && original?._csrfRetried) {
+      signalAuthFailure()
+      return Promise.reject(error)
     }
+
+    if (!suppressNotice) notifyErrorOnce(error)
     return Promise.reject(error)
   }
 );

@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react"
-import { getAuthStatus, login } from "../api/client"
+import { useNavigate } from "react-router-dom"
+import { getAuthStatus, login, resetAuthFailure } from "../api/client"
+import { useLang } from "../context/LangContext"
+import { useToast } from "../context/ToastContext"
 import LoginPage from "../pages/LoginPage"
 
 function AuthGate({ children }) {
+  const navigate = useNavigate()
+  const { t } = useLang()
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
   const [password, setPassword] = useState("VideoNote2026.")
@@ -12,7 +18,11 @@ function AuthGate({ children }) {
   const refresh = async () => {
     try {
       const status = await getAuthStatus()
-      setAuthenticated(Boolean(status.authenticated))
+      const nextAuthenticated = Boolean(status.authenticated)
+      setAuthenticated(nextAuthenticated)
+      if (!nextAuthenticated && window.location.pathname !== "/") {
+        navigate("/", { replace: true })
+      }
     } catch {
       setAuthenticated(false)
     } finally {
@@ -22,10 +32,15 @@ function AuthGate({ children }) {
 
   useEffect(() => {
     refresh()
-    const handleUnauthorized = () => setAuthenticated(false)
+    const handleUnauthorized = (event) => {
+      setAuthenticated(false)
+      setLoading(false)
+      if (event.detail?.expired) toast.info(t("auth.sessionExpired"))
+      navigate("/", { replace: true })
+    }
     window.addEventListener("vn-unauthorized", handleUnauthorized)
     return () => window.removeEventListener("vn-unauthorized", handleUnauthorized)
-  }, [])
+  }, [navigate, t])
 
   const submit = async (event) => {
     event.preventDefault()
@@ -34,6 +49,7 @@ function AuthGate({ children }) {
     setSubmitting(true)
     try {
       await login(password)
+      resetAuthFailure()
       setAuthenticated(true)
       setPassword("")
     } catch {

@@ -38,6 +38,9 @@
     "chinese": "Chinese",
     "english": "English"
   },
+  "auth": {
+    "sessionExpired": "Your session has expired. Please log in again."
+  },
   "header": {
     "upload": "Upload",
     "history": "History",
