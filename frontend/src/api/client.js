@@ -1,6 +1,6 @@
 ﻿import axios from 'axios';
 
-export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+export const API_BASE = (import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
 const TOKEN_KEY = 'videonote_token'
 export const getToken = () => {
