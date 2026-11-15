@@ -5,16 +5,13 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://106.55.19.23/api/:path*"
-    },
-    {
-      "source": "/static/:path*",
-      "destination": "https://106.55.19.23/static/:path*"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "build": {
+    "env": {
+      "VITE_API_BASE": "https://106.55.19.23"
+    }
+  }
 }

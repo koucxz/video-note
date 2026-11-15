@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom"
 import { useLang } from "../context/LangContext"
 import { History, Upload, Sparkles, Settings, Globe, BookOpen, Github, LogOut } from "lucide-react"
-import { logout } from "../api/client"
+import { logout, clearToken } from "../api/client"
 import { Button } from "./ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 
@@ -10,7 +10,7 @@ function Header() {
   const { t, toggleLang } = useLang()
 
   const handleLogout = async () => {
-    try { await logout() } finally { window.dispatchEvent(new CustomEvent("vn-unauthorized")) }
+    try { await logout(); clearToken() } finally { window.dispatchEvent(new CustomEvent("vn-unauthorized")) }
   }
 
   const navItems = [

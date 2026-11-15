@@ -1,4 +1,16 @@
 ﻿import { useEffect, useRef, useCallback, useState } from 'react';
+import { API_BASE, getToken } from '../api/client';
+
+// Same-origin builds leave API_BASE empty and keep using window.location.host.
+// A cross-origin build injects https://106.55.19.23, which becomes wss://.
+const WS_BASE = API_BASE
+  ? API_BASE.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
+  : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+
+const buildWsUrl = (path) => {
+  const token = getToken();
+  return `${WS_BASE}${path}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+};
 
 export function useTaskWebSocket(taskId) {
   const wsRef = useRef(null);
@@ -7,8 +19,7 @@ export function useTaskWebSocket(taskId) {
 
   const connect = useCallback(() => {
     if (!taskId) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/task/${taskId}`);
+    const ws = new WebSocket(buildWsUrl(`/ws/task/${taskId}`));
     wsRef.current = ws;
 
     ws.onmessage = (e) => {
@@ -42,8 +53,7 @@ export function useGlobalWebSocket() {
   const reconnectTimer = useRef(null);
 
   const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/all`);
+    const ws = new WebSocket(buildWsUrl('/ws/all'));
     wsRef.current = ws;
 
     ws.onmessage = (e) => {

@@ -16,7 +16,10 @@ from pathlib import Path
 
 from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router, auth_router
 from .core.engine import get_engine
-from .security import AUTH_ENABLED, CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, SESSION_SECRET, valid_csrf, validate_session
+from .security import (
+    AUTH_ENABLED, CSRF_COOKIE, CSRF_HEADER, SESSION_SECRET,
+    get_session_value, is_token_auth, valid_csrf, validate_session,
+)
 from .rate_limit import allow_request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -73,13 +76,6 @@ Convert videos into structured notes using AI.
 )
 
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in cors_origins],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 _AUTH_BYPASS = {"/api/health", "/api/auth/login", "/api/auth/me", "/api/auth/logout"}
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -92,12 +88,20 @@ async def auth_middleware(request: Request, call_next):
     Local development remains backwards compatible when VIDEONOTE_AUTH_PASSWORD
     is unset. Production deployments must set both auth password and session
     secret in the environment.
+
+    Two credential modes share the same signed session string: the same-origin
+    443 entry keeps using the vn_session cookie plus double-submit CSRF cookie,
+    while the cross-origin Vercel UI uses a Bearer/query token (CSRF-exempt).
     """
+    # Preflight must never be rejected by auth. CORSMiddleware is registered
+    # outermost and normally short-circuits OPTIONS already; this is a guard.
+    if request.method == "OPTIONS":
+        return await call_next(request)
     protected_path = request.url.path.startswith("/api") or request.url.path.startswith("/static/output")
     if AUTH_ENABLED and protected_path:
         # A signed session is stable per browser and avoids collapsing all
         # users behind the frontend container into one rate-limit bucket.
-        client_id = request.cookies.get(SESSION_COOKIE, "")
+        client_id = get_session_value(request) or ""
         forwarded_for = request.headers.get("x-forwarded-for", "")
         client_id = client_id or forwarded_for.split(",", 1)[0].strip() or request.headers.get("x-real-ip", "")
         client_id = client_id or (request.client.host if request.client else "unknown")
@@ -105,9 +109,11 @@ async def auth_middleware(request: Request, call_next):
             return JSONResponse(status_code=429, content={"detail": "Too many requests"}, headers={"Retry-After": "60"})
         path = request.url.path
         if path not in _AUTH_BYPASS:
-            if not validate_session(request.cookies.get(SESSION_COOKIE)):
+            if not validate_session(get_session_value(request)):
                 return JSONResponse(status_code=401, content={"detail": "Authentication required"})
-            if request.method in _MUTATING_METHODS and not valid_csrf(
+            # Token credentials are injected explicitly by JS, so a cross-site
+            # form cannot forge them and no double-submit CSRF cookie is needed.
+            if request.method in _MUTATING_METHODS and not is_token_auth(request) and not valid_csrf(
                 request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)
             ):
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
@@ -118,9 +124,11 @@ async def auth_middleware(request: Request, call_next):
 async def timing_middleware(request: Request, call_next):
     """Log method/path/status/duration for every HTTP request.
 
-    Registered last on purpose: Starlette puts the most recently added
-    user middleware outermost, so this wraps auth/rate-limit/CORS and measures
-    the whole request. Slow requests (>500ms) are logged on one WARNING line.
+    Registered last among the user middlewares: Starlette puts the most
+    recently added one outermost, so this wraps auth/rate-limit and measures the
+    whole request. CORSMiddleware is added afterwards so it sits outermost and
+    answers preflight before auth can 401 it. Slow requests (>500ms) are logged
+    on one WARNING line.
     """
     start = time.perf_counter()
     try:
@@ -138,6 +146,19 @@ async def timing_middleware(request: Request, call_next):
         logger.info(line)
     return response
 
+
+# Registered *after* every @app.middleware("http") decorator: Starlette's
+# add_middleware inserts at index 0, so the last one added is outermost. CORS
+# must wrap auth/timing to answer OPTIONS preflight before auth can 401 it and
+# to attach CORS headers to 401/403 JSON responses. Headers are listed
+# explicitly so credentials=True preflight still allows them on every version.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in cors_origins],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+)
 
 app.include_router(upload_router)
 app.include_router(task_router)
@@ -181,7 +202,9 @@ async def get_job_status(job_id: str):
 def _websocket_allowed(websocket: WebSocket) -> bool:
     if not AUTH_ENABLED:
         return True
-    if not validate_session(websocket.cookies.get(SESSION_COOKIE)):
+    # A cross-origin browser cannot send the SameSite=Lax vn_session cookie, so
+    # the Vercel frontend appends ?token=<signed session> to the WebSocket URL.
+    if not validate_session(get_session_value(websocket)):
         return False
     origin = websocket.headers.get("origin")
     if not origin:

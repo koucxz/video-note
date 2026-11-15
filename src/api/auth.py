@@ -5,9 +5,9 @@ from pydantic import BaseModel
 
 from ..security import (
     AUTH_ENABLED,
-    SESSION_COOKIE,
     clear_auth_cookies,
     create_session,
+    get_session_value,
     new_csrf_token,
     set_auth_cookies,
     validate_session,
@@ -24,7 +24,7 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 async def login(data: LoginRequest):
     if not AUTH_ENABLED:
-        response = JSONResponse({"authenticated": True, "auth_enabled": False})
+        response = JSONResponse({"authenticated": True, "auth_enabled": False, "token": ""})
         set_auth_cookies(response, "", new_csrf_token())
         return response
 
@@ -33,14 +33,15 @@ async def login(data: LoginRequest):
 
     if data.username.strip() != "admin" or not hmac.compare_digest(data.password, AUTH_PASSWORD):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    response = JSONResponse({"authenticated": True, "auth_enabled": True})
-    set_auth_cookies(response, create_session(), new_csrf_token())
+    session = create_session()
+    response = JSONResponse({"authenticated": True, "auth_enabled": True, "token": session})
+    set_auth_cookies(response, session, new_csrf_token())
     return response
 
 
 @router.get("/me")
 async def me(request: Request):
-    authenticated = not AUTH_ENABLED or validate_session(request.cookies.get(SESSION_COOKIE))
+    authenticated = not AUTH_ENABLED or validate_session(get_session_value(request))
     response = JSONResponse({"authenticated": authenticated, "auth_enabled": AUTH_ENABLED})
     if authenticated:
         response.set_cookie("vn_csrf", new_csrf_token(), httponly=False, samesite="lax", path="/")

@@ -70,6 +70,39 @@ def valid_csrf(cookie_value: Optional[str], header_value: Optional[str]) -> bool
     return bool(cookie_value and header_value and hmac.compare_digest(cookie_value, header_value))
 
 
+def get_session_value(request) -> Optional[str]:
+    """Resolve the signed session string from any supported credential source.
+
+    The same-origin 443 entry keeps using the vn_session cookie. A cross-origin
+    Vercel frontend cannot send that SameSite=Lax cookie, so it passes the very
+    same signed string as a Bearer token (HTTP/SSE) or a ?token= query param
+    (WebSocket). Cookie takes precedence to preserve the original behaviour.
+    """
+    value = request.cookies.get(SESSION_COOKIE)
+    if value:
+        return value
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token:
+            return token
+    return request.query_params.get("token") or None
+
+
+def is_token_auth(request) -> bool:
+    """True when the credential came from a Bearer/query token, not a cookie.
+
+    Such credentials must be injected explicitly by JavaScript, so a cross-site
+    form cannot forge them and the double-submit CSRF check can be skipped.
+    """
+    if request.cookies.get(SESSION_COOKIE):
+        return False
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer ") and authorization[7:].strip():
+        return True
+    return bool(request.query_params.get("token"))
+
+
 def set_auth_cookies(response, session: str, csrf: str) -> None:
     # Local HTTP development must be able to send the session cookie. Production
     # deployments should set VIDEONOTE_COOKIE_SECURE=true explicitly.

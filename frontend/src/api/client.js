@@ -1,7 +1,23 @@
 ﻿import axios from 'axios';
 
+export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+
+const TOKEN_KEY = 'videonote_token'
+export const getToken = () => {
+  try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' }
+}
+export const setToken = (token) => {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {}
+}
+export const clearToken = () => {
+  try { localStorage.removeItem(TOKEN_KEY) } catch {}
+}
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE + '/api',
   timeout: 300000,
   withCredentials: true,
 });
@@ -58,6 +74,8 @@ const readCookie = (name) => document.cookie
   ?.split('=').slice(1).join('=') || ''
 
 api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) config.headers['Authorization'] = 'Bearer ' + token
   const method = (config.method || 'get').toUpperCase()
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !config.url?.endsWith('/auth/login')) {
     const csrf = readCookie('vn_csrf')
@@ -76,7 +94,14 @@ api.interceptors.response.use(
 
     const authRequired = msg === 'Authentication required' || (status === 401 && !isAuthEndpoint(original?.url))
     if (authRequired) {
+      clearToken()
       signalAuthFailure()
+      return Promise.reject(error)
+    }
+
+    // Token mode is CSRF-exempt server-side; failing fast avoids a pointless
+    // /auth/me + retry loop if a 403 ever leaks through.
+    if (status === 403 && msg === 'CSRF validation failed' && original && getToken()) {
       return Promise.reject(error)
     }
 
@@ -258,7 +283,9 @@ export const ragAskStream = async (payload, onDelta = null) => {
   const headers = { 'Content-Type': 'application/json' }
   const csrf = readCookie('vn_csrf')
   if (csrf) headers['X-CSRF-Token'] = csrf
-  const response = await fetch('/api/rag/ask/stream', {
+  const token = getToken()
+  if (token) headers['Authorization'] = 'Bearer ' + token
+  const response = await fetch(API_BASE + '/api/rag/ask/stream', {
     method: 'POST',
     credentials: 'include',
     headers,
@@ -322,7 +349,11 @@ export const updateSettings = async (patch) => { return (await api.put('/setting
 // -- Authentication --
 export const getAuthStatus = async () => (await api.get('/auth/me')).data;
 export const login = async (username, password) => (await api.post('/auth/login', { username, password })).data;
-export const logout = async () => (await api.post('/auth/logout')).data;
+export const logout = async () => {
+  const data = (await api.post('/auth/logout')).data;
+  clearToken();
+  return data;
+};
 
 // -- Providers --
 export const getProviders = async () => { return (await api.get('/providers')).data; };

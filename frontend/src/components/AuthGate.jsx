@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { getAuthStatus, login, resetAuthFailure } from "../api/client"
+import { getAuthStatus, login, resetAuthFailure, setToken, clearToken } from "../api/client"
 import { useLang } from "../context/LangContext"
 import { useToast } from "../context/ToastContext"
 import LoginPage from "../pages/LoginPage"
@@ -34,6 +34,7 @@ function AuthGate({ children }) {
   useEffect(() => {
     refresh()
     const handleUnauthorized = (event) => {
+      clearToken()
       setAuthenticated(false)
       setLoading(false)
       if (event.detail?.expired) toast.info(t("auth.sessionExpired"))
@@ -49,7 +50,8 @@ function AuthGate({ children }) {
     setError("")
     setSubmitting(true)
     try {
-      await login(username, password)
+      const response = await login(username, password)
+      if (response?.token) setToken(response.token)
       resetAuthFailure()
       setAuthenticated(true)
       setPassword("")
