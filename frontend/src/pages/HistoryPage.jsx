@@ -169,10 +169,10 @@ function HistoryPage() {
                 <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
                   <th className="w-8 px-3 py-2"><button onClick={selectAll} className="text-muted-foreground hover:text-foreground">{selected.size > 0 ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></th>
                   <th className="px-3 py-2">{t('history.video')}</th>
-                  <th className="px-3 py-2">{t('history.status')}</th>
+                  <th className="w-28 px-3 py-2">{t('history.status')}</th>
                   <th className="px-3 py-2">{t('history.style')}</th>
                   <th className="px-3 py-2 text-right">{t('history.tokens')}</th>
-                  <th className="px-3 py-2">{t('history.created')}</th>
+                  <th className="whitespace-nowrap px-3 py-2">{t('history.created')}</th>
                   <th className="px-3 py-2 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
@@ -195,10 +195,10 @@ function HistoryPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2"><Badge variant={sc.variant}>{t(`status.${item.status}`)}</Badge></td>
-                      <td className="px-3 py-2 text-muted-foreground">{t('noteStyle.' + (item.note_style || '')) || item.note_style || "-"}</td>
+                      <td className="w-28 px-3 py-2"><Badge variant={sc.variant} className="whitespace-nowrap">{t(`status.${item.status}`)}</Badge></td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{t('noteStyle.' + (item.note_style || '')) || item.note_style || "-"}</td>
                       <td className="px-3 py-2 text-right font-mono text-xs">{item.totalTokens || "-"}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{formatDate(item.createdAt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{formatDate(item.createdAt)}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {canView && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}><Eye className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('history.viewNote')}</TooltipContent></Tooltip>}
