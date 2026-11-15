@@ -1,4 +1,5 @@
 """Note API - multi-version notes, editing, polish, flashcards, RAG Q&A."""
+import asyncio
 import io
 import json
 import logging
@@ -660,10 +661,10 @@ async def rag_ask(body: dict = {}):
             session = engine.checkpoint.update_qa_session(session_id, scope=scope)
         else:
             scope = session.get("scope") or {}
-        persisted = engine.checkpoint.get_qa_messages(session_id)
+        persisted = engine.checkpoint.get_qa_messages(session_id, limit=6)
         history = [
             {"role": m["role"], "content": m["content"]}
-            for m in persisted[-6:]
+            for m in persisted
         ] or request_history
     else:
         history = request_history
@@ -673,23 +674,31 @@ async def rag_ask(body: dict = {}):
     from ..services.vector_service import get_vector_service
     vector = get_vector_service()
 
-    relevant_chunks = vector.search(question, top_k=8, task_ids=task_ids_filter)
+    # 向量检索内部是同步的远程 embedding 调用（SiliconFlow），直接放在 async 里会
+    # 阻塞整个 uvicorn 事件循环（实测热调用约 200ms、冷启动约 1.4s），
+    # 期间 health / WebSocket / 其它页面请求全部排队。统一丢到线程池。
+    relevant_chunks = await asyncio.to_thread(vector.search, question, 8, task_ids_filter)
 
-    if not relevant_chunks:
-        # Fallback: index all notes first
-        all_tasks = engine.checkpoint.get_all_tasks()
-        completed = [t for t in all_tasks if t["status"] == "completed"]
-        notes_to_index = []
-        for t in completed:
-            vers = engine.checkpoint.get_note_versions(t["id"])
-            content = vers[-1]["content"] if vers else ""
-            if not content and t.get("note_path") and Path(t["note_path"]).exists():
-                content = Path(t["note_path"]).read_text(encoding="utf-8")
-            if content:
-                notes_to_index.append({"task_id": t["id"], "content": content})
+    if not relevant_chunks and not vector.has_index:
+        # 只有索引确实为空才重建。索引有数据但没命中（例如 scope 选了未入库的笔记、
+        # 或相似度低于阈值）时全量重建既耗时又不会改善结果，直接跳过。
+        def _collect_notes():
+            all_tasks = engine.checkpoint.get_all_tasks()
+            completed = [t for t in all_tasks if t["status"] == "completed"]
+            notes = []
+            for t in completed:
+                vers = engine.checkpoint.get_note_versions(t["id"])
+                content = vers[-1]["content"] if vers else ""
+                if not content and t.get("note_path") and Path(t["note_path"]).exists():
+                    content = Path(t["note_path"]).read_text(encoding="utf-8")
+                if content:
+                    notes.append({"task_id": t["id"], "content": content})
+            return notes
+
+        notes_to_index = await asyncio.to_thread(_collect_notes)
         if notes_to_index:
-            vector.rebuild_from_notes(notes_to_index)
-            relevant_chunks = vector.search(question, top_k=8, task_ids=task_ids_filter)
+            await asyncio.to_thread(vector.rebuild_from_notes, notes_to_index)
+            relevant_chunks = await asyncio.to_thread(vector.search, question, 8, task_ids_filter)
 
     if not relevant_chunks:
         answer = "No notes available for Q&A."
@@ -719,7 +728,7 @@ async def rag_ask(body: dict = {}):
         ensure_budget(6000)
         if hasattr(engine.ai, '_llm'):
             response = await engine.ai._llm.chat.completions.create(
-                model=engine.ai.model, messages=messages, max_tokens=2048)
+                model=engine.ai.model, messages=messages, max_tokens=2048, timeout=60.0)
             message = response.choices[0].message
             answer = _response_value(message, "content") or ""
             thinking = _extract_thinking(message)
@@ -727,7 +736,7 @@ async def rag_ask(body: dict = {}):
             record_tokens(total, 6000)
         elif hasattr(engine.ai, '_client'):
             response = await engine.ai._client.messages.create(
-                model=engine.ai.model, max_tokens=2048, messages=messages)
+                model=engine.ai.model, max_tokens=2048, messages=messages, timeout=60.0)
             thinking_parts = []
             answer_parts = []
             for block in response.content:

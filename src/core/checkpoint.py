@@ -360,15 +360,25 @@ class CheckpointManager:
             cur = self.conn.execute("DELETE FROM qa_sessions WHERE id = ?", (session_id,))
             return bool(cur.rowcount)
 
-    def get_qa_messages(self, session_id: str) -> List[dict]:
+    def get_qa_messages(self, session_id: str, limit: Optional[int] = None) -> List[dict]:
         with self._lock:
-            cur = self.conn.execute(
-                """SELECT id, session_id, role, content, sources, tokens, created_at
-                   FROM qa_messages WHERE session_id = ?
-                   ORDER BY created_at, rowid""",
-                (session_id,),
-            )
-            rows = cur.fetchall()
+            if limit:
+                # 问答只需要最近几轮；长会话不必把全部消息读进内存
+                cur = self.conn.execute(
+                    """SELECT id, session_id, role, content, sources, tokens, created_at
+                       FROM qa_messages WHERE session_id = ?
+                       ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+                    (session_id, int(limit)),
+                )
+                rows = list(reversed(cur.fetchall()))
+            else:
+                cur = self.conn.execute(
+                    """SELECT id, session_id, role, content, sources, tokens, created_at
+                       FROM qa_messages WHERE session_id = ?
+                       ORDER BY created_at, rowid""",
+                    (session_id,),
+                )
+                rows = cur.fetchall()
         result = []
         for row in rows:
             try:

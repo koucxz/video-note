@@ -326,6 +326,13 @@ class VectorService:
     def backend(self) -> str:
         return "milvus" if self._milvus_ready else "numpy"
 
+    @property
+    def has_index(self) -> bool:
+        """索引里是否已有分块，用于判断空结果是否值得触发全量重建。"""
+        if self._milvus_ready:
+            return True
+        return bool(self._chunk_meta)
+
 
 _vector_service = None
 

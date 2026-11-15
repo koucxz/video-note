@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { memo, useState, useRef, useEffect } from "react"
 import { Send, Loader2, Bot, User, FileText, BookOpen, Plus, Pencil, Trash2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import {
@@ -61,6 +61,29 @@ function ThinkingText({ content, done, t }) {
     </div>
   )
 }
+
+// 打字机动效固定总时长：无论回答多长，都只在最多 ~1.3s 内逐段推进，
+// 避免「后端已返回，用户还要盯着逐字输出几十秒且输入框被锁死」。
+const TYPE_INTERVAL_MS = 18
+const MAX_TYPE_TICKS = 70
+
+const MessageRow = memo(function MessageRow({ message, t }) {
+  return (
+    <div className={cn("flex gap-3", message.role === "user" && "justify-end")}>
+      {message.role !== "user" && <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10"><Bot className="h-4 w-4 text-primary" /></div>}
+      <div className={cn("max-w-[80%] rounded-xl px-4 py-3 text-sm", message.role === "user" ? "bg-primary text-primary-foreground" : message.error ? "bg-destructive/10 text-destructive" : "bg-muted")}>
+        {message.role === "user" ? <p className="whitespace-pre-wrap">{message.content}</p> : (
+          <>
+            <ThinkingText content={message.thinking} done={message.thinking === message.fullThinking} t={t} />
+            <article className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{message.content}</ReactMarkdown></article>
+            {message.sources?.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{message.sources.map((source, sourceIndex) => <Badge key={sourceIndex} variant="outline" className="text-xs"><FileText className="mr-1 h-3 w-3" />{source.title?.substring(0, 30)}</Badge>)}</div>}
+          </>
+        )}
+      </div>
+      {message.role === "user" && <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted"><User className="h-4 w-4" /></div>}
+    </div>
+  )
+})
 
 export default function RAGPage() {
   const { t } = useLang()
@@ -129,13 +152,15 @@ export default function RAGPage() {
   useEffect(() => {
     const container = messagesScrollRef.current
     if (!container) return
-    const behavior = restoreScrollRef.current ? "auto" : "smooth"
-    if (behavior === "auto") {
-      container.scrollTop = container.scrollHeight
-    } else {
-      container.scrollTo({ top: container.scrollHeight, behavior })
-    }
+    const force = restoreScrollRef.current
     restoreScrollRef.current = false
+    // 用户往上翻看历史时不强行拽回底部
+    const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+    if (!force && distance > 160) return
+    // 打字期间 messages 每次变化都会触发这里；用瞬时滚动，避免每秒数十次
+    // 重启平滑滚动动画造成掉帧。普通新消息仍保留平滑效果。
+    if (force || typingTimer.current) container.scrollTop = container.scrollHeight
+    else container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
   }, [messages])
 
   useEffect(() => {
@@ -153,35 +178,32 @@ export default function RAGPage() {
     const id = message.id || `assistant-${Date.now()}`
     const fullThinking = message.thinking || ""
     const fullAnswer = message.content || ""
+    // 按总字数自适应步长，把打字机总时长钉在 MAX_TYPE_TICKS * TYPE_INTERVAL_MS 以内
+    const step = Math.max(1, Math.ceil((fullThinking.length + fullAnswer.length) / MAX_TYPE_TICKS))
     setMessages(prev => [...prev, { ...message, id, content: "", thinking: "", fullThinking }])
     setTypingId(id)
     let phase = fullThinking ? "thinking" : "answer"
     let cursor = 0
     if (typingTimer.current) window.clearInterval(typingTimer.current)
     typingTimer.current = window.setInterval(() => {
-      cursor += 1
       const value = phase === "thinking" ? fullThinking : fullAnswer
+      cursor = Math.min(cursor + step, value.length)
+      const slice = value.slice(0, cursor)
+      // 只有正在输出的那一条消息对象会换新引用，其余行由 MessageRow 的 memo 跳过重渲染
       setMessages(prev => prev.map(item => item.id === id
-        ? phase === "thinking"
-          ? { ...item, thinking: fullThinking.slice(0, cursor) }
-          : { ...item, content: fullAnswer.slice(0, cursor) }
+        ? (phase === "thinking" ? { ...item, thinking: slice } : { ...item, content: slice })
         : item))
       if (cursor >= value.length) {
-        if (phase === "thinking") {
+        if (phase === "thinking" && fullAnswer) {
           phase = "answer"
           cursor = 0
-          if (!fullAnswer) {
-            window.clearInterval(typingTimer.current)
-            typingTimer.current = null
-            setTypingId(null)
-          }
         } else {
           window.clearInterval(typingTimer.current)
           typingTimer.current = null
           setTypingId(null)
         }
       }
-    }, 18)
+    }, TYPE_INTERVAL_MS)
   }
 
   const toggleNote = (taskId) => {
@@ -346,19 +368,7 @@ export default function RAGPage() {
           ) : (
             <div className="mx-auto max-w-3xl space-y-4">
               {messages.map((message, index) => (
-                <div key={message.id || index} className={cn("flex gap-3", message.role === "user" && "justify-end")}>
-                  {message.role !== "user" && <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10"><Bot className="h-4 w-4 text-primary" /></div>}
-                  <div className={cn("max-w-[80%] rounded-xl px-4 py-3 text-sm", message.role === "user" ? "bg-primary text-primary-foreground" : message.error ? "bg-destructive/10 text-destructive" : "bg-muted")}>
-                    {message.role === "user" ? <p className="whitespace-pre-wrap">{message.content}</p> : (
-                      <>
-                        <ThinkingText content={message.thinking} done={message.thinking === message.fullThinking} t={t} />
-                        <article className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{message.content}</ReactMarkdown></article>
-                        {message.sources?.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{message.sources.map((source, sourceIndex) => <Badge key={sourceIndex} variant="outline" className="text-xs"><FileText className="mr-1 h-3 w-3" />{source.title?.substring(0, 30)}</Badge>)}</div>}
-                      </>
-                    )}
-                  </div>
-                  {message.role === "user" && <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted"><User className="h-4 w-4" /></div>}
-                </div>
+                <MessageRow key={message.id || index} message={message} t={t} />
               ))}
               {loading && <ThinkingIndicator step={thinkingStep} t={t} />}
               <div aria-hidden="true" />
