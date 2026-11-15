@@ -2,7 +2,7 @@ import { memo, useState, useRef, useEffect } from "react"
 import { Send, Loader2, Bot, User, FileText, BookOpen, Plus, Pencil, Trash2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import {
-  ragAsk, getHistoryAll,
+  ragAsk, ragAskStream, getHistoryAll,
   getRagSessions, getRagSession, renameRagSession, deleteRagSession,
 } from "../api/client"
 import { useLang } from "../context/LangContext"
@@ -265,7 +265,21 @@ export default function RAGPage() {
     try {
       const scope = { task_ids: [...selectedNotes] }
       const history = messages.slice(-6).map(message => ({ role: message.role, content: message.content }))
-      const response = await ragAsk(question, history, scope, activeSessionId)
+      // Prefer the SSE stream. Its `done` payload has the exact same shape as
+      // ragAsk's response, so the typewriter/session UI below is unchanged.
+      // On any stream failure (HTTP/CSRF/auth/network/error event) fall back
+      // to the original JSON endpoint, which also owns the CSRF retry logic.
+      let response
+      try {
+        response = await ragAskStream({
+          question,
+          history,
+          scope,
+          ...(activeSessionId ? { session_id: activeSessionId } : {}),
+        })
+      } catch {
+        response = await ragAsk(question, history, scope, activeSessionId)
+      }
       const sessionId = response.session_id || activeSessionId
       const assistantMessage = response.assistant_message || {
         role: "assistant",

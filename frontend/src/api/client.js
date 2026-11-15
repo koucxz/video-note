@@ -114,6 +114,25 @@ api.interceptors.response.use(
   }
 );
 
+// ── Background job polling ──
+// Mutating endpoints (polish/flashcards) now return a job id immediately;
+// state lives in the shared DB so any worker can answer the poll.
+const pollJob = async (jobId) => {
+  for (let attempt = 0; attempt < 180; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    const response = await api.get('/jobs/' + jobId)
+    const job = response.data?.data || response.data
+    if (!job) throw new Error('Background job disappeared')
+    if (job.status === 'done') return job.result || {}
+    if (job.status === 'failed') {
+      const message = job.error || 'Background job failed'
+      if (_toast) _toast.error(message, 'Server Error')
+      throw new Error(message)
+    }
+  }
+  throw new Error('Background job timed out')
+}
+
 // ── Upload ──
 export const uploadVideo = async (file, onProgress, language = 'zh', noteStyle = 'standard', processingOptions = {}) => {
   const formData = new FormData();
@@ -169,9 +188,14 @@ export const editNote = async (taskId, content) => { return (await api.post('/no
 export const deleteNoteVersion = async (taskId, versionId) => { return (await api.delete('/note/' + taskId + '/version/' + versionId)).data; };
 export const revertNoteVersion = async (taskId, versionId) => { return (await api.post('/note/' + taskId + '/revert/' + versionId)).data; };
 
-// ── Polish ──
+// ── Polish (queued) ──
+// Keeps the old return shape ({ task_id, version }) so noteStore/NotePage
+// keep working unchanged; the polling is hidden inside the client.
 export const polishNote = async (taskId, style, extraInstructions) => {
-  return (await api.post('/note/' + taskId + '/polish', { style, extra_instructions: extraInstructions })).data;
+  const started = (await api.post('/note/' + taskId + '/polish', { style, extra_instructions: extraInstructions })).data;
+  const jobId = started?.data?.job_id || started?.job_id
+  if (!jobId) return started
+  return pollJob(jobId)
 };
 
 const downloadBlob = async (path, filename, mimeType) => {
@@ -202,9 +226,13 @@ export const downloadNotesZip = async (taskIds, format) => {
   URL.revokeObjectURL(url);
 };
 
-// ── Flashcards ──
+// ── Flashcards (queued) ──
+// Returns { cards: [...] } exactly like before, so FlashcardPage is unchanged.
 export const generateFlashcards = async (taskId, count = 8) => {
-  return (await api.post('/note/' + taskId + '/flashcards', { count })).data;
+  const started = (await api.post('/note/' + taskId + '/flashcards', { count })).data;
+  const jobId = started?.data?.job_id || started?.job_id
+  if (!jobId) return started
+  return pollJob(jobId)
 };
 
 // ── Favorites ──
@@ -219,6 +247,64 @@ export const ragAsk = async (question, history = [], scope = {}, sessionId = nul
     scope,
     ...(sessionId ? { session_id: sessionId } : {}),
   })).data;
+};
+
+// ── Streaming RAG (SSE) ──
+// Reads the SSE stream with fetch/ReadableStream (axios cannot stream the
+// response body). Resolves with the `done` payload, which is intentionally
+// identical in shape to ragAsk's response. Throws on HTTP/CSRF/auth errors
+// or an `error` event so the caller can fall back to ragAsk.
+export const ragAskStream = async (payload, onDelta = null) => {
+  const headers = { 'Content-Type': 'application/json' }
+  const csrf = readCookie('vn_csrf')
+  if (csrf) headers['X-CSRF-Token'] = csrf
+  const response = await fetch('/api/rag/ask/stream', {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    let detail = 'Stream request failed'
+    try {
+      const body = await response.json()
+      detail = body?.detail || body?.message || detail
+    } catch {}
+    throw new Error(detail)
+  }
+  if (!response.body) throw new Error('Streaming not supported by this browser')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let doneData = null
+  let streamError = null
+  let finished = false
+  while (!finished) {
+    const { value, done } = await reader.read()
+    finished = done
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !finished })
+    let boundary
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      let event = 'message'
+      let data = ''
+      for (const line of frame.split(/\r?\n/)) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      }
+      if (!data) continue
+      let parsed
+      try { parsed = JSON.parse(data) } catch { continue }
+      if (event === 'delta') onDelta?.(parsed)
+      else if (event === 'done') doneData = parsed
+      else if (event === 'error') streamError = parsed
+    }
+  }
+  if (streamError) throw new Error(streamError.error || 'Stream error')
+  if (!doneData) throw new Error('Stream ended before completion')
+  return doneData
 };
 export const getRagSessions = async (limit = 50) => (await api.get('/rag/sessions', { params: { limit } })).data;
 export const getRagSession = async (sessionId) => (await api.get('/rag/sessions/' + sessionId)).data;

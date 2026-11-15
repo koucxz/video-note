@@ -13,10 +13,14 @@ WINDOW_SECONDS = 60
 LIMITS = {
     ("POST", "/api/auth/login"): 10,
     ("POST", "/api/upload"): 5,
-    ("POST", "/api/rag/ask"): 30,
+    # The stream endpoint shares this prefix; both forms allow 60/min.
+    ("POST", "/api/rag/ask"): 60,
     ("POST", "/api/note/"): 30,
     ("POST", "/api/task/"): 30,
 }
+
+_EXEMPT_METHODS = {"GET", "HEAD"}
+_EXEMPT_PATHS = {"/api/health"}
 
 _events: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _lock = Lock()
@@ -30,6 +34,12 @@ def _limit_for(method: str, path: str) -> int | None:
 
 
 def allow_request(client_id: str, method: str, path: str) -> bool:
+    # Read-only traffic (health checks, job polling, page loads) is cheap and
+    # must never be throttled by the mutating-endpoint budget.
+    if method in _EXEMPT_METHODS:
+        return True
+    if path.split("?", 1)[0] in _EXEMPT_PATHS:
+        return True
     limit = _limit_for(method, path)
     if limit is None:
         return True

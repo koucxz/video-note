@@ -35,6 +35,9 @@ class CheckpointManager:
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        # With multiple uvicorn workers writing to the same WAL database, give
+        # contended writers a grace period instead of failing immediately.
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self._init_db()
 
     def _init_db(self) -> None:
@@ -106,6 +109,19 @@ class CheckpointManager:
                 """CREATE TABLE IF NOT EXISTS token_usage (
                     day TEXT PRIMARY KEY, tokens INTEGER NOT NULL DEFAULT 0,
                     calls INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP)""")
+            # Background jobs are shared across uvicorn workers: the request
+            # that submits a job and the request that polls it may land on
+            # different processes, so state must live in the database.
+            self.conn.execute(
+                """CREATE TABLE IF NOT EXISTS background_jobs (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    progress REAL DEFAULT 0,
+                    result_json TEXT,
+                    error TEXT,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP)""")
             for col, default in [("display_name", ""), ("language", "zh"), ("note_style", "standard"), ("error_kind", "unknown"),
                                   ("processing_overrides", "{}"), ("total_tokens", "0"),
                                   ("platform", ""), ("video_url", ""), ("model_name", "")]:
@@ -238,6 +254,58 @@ class CheckpointManager:
                 "error_kind='interrupted', updated_at=? WHERE status IN ('processing','pending')",
                 (datetime.now(),))
             return cur.rowcount or 0
+
+    # ── Background jobs (shared across workers) ──
+
+    @staticmethod
+    def _job_row_to_dict(row) -> dict:
+        result = None
+        if row[4]:
+            try:
+                result = json.loads(row[4])
+            except (TypeError, json.JSONDecodeError):
+                result = row[4]
+        return {
+            "job_id": row[0],
+            "kind": row[1],
+            "status": row[2],
+            "progress": float(row[3] or 0),
+            "result": result,
+            "error": row[5],
+            "created_at": row[6].isoformat() if isinstance(row[6], datetime) else str(row[6] or ""),
+            "updated_at": row[7].isoformat() if isinstance(row[7], datetime) else str(row[7] or ""),
+        }
+
+    def save_job(self, job_id: str, kind: str, status: str = "queued", progress: float = 0.0) -> None:
+        now = datetime.now()
+        with self._lock:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO background_jobs
+                   (id, kind, status, progress, result_json, error, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)""",
+                (job_id, kind, status, float(progress), now, now),
+            )
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                """SELECT id, kind, status, progress, result_json, error, created_at, updated_at
+                   FROM background_jobs WHERE id = ?""",
+                (job_id,),
+            )
+            row = cur.fetchone()
+        return self._job_row_to_dict(row) if row else None
+
+    def update_job(self, job_id: str, **kwargs) -> None:
+        allowed = {"status", "progress", "result_json", "error"}
+        safe = {k: v for k, v in kwargs.items() if k in allowed}
+        if not safe:
+            return
+        safe["updated_at"] = datetime.now()
+        set_clause = ", ".join(f"{k} = ?" for k in safe)
+        values = list(safe.values()) + [job_id]
+        with self._lock:
+            self.conn.execute(f"UPDATE background_jobs SET {set_clause} WHERE id = ?", values)
 
     # ── RAG chat sessions ──
 

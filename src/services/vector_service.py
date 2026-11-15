@@ -1,12 +1,14 @@
 """Vector embedding and search service for RAG.
 Supports Milvus (production) with numpy fallback (local dev).
 Uses sentence-transformers for embeddings."""
+import hashlib
 import logging
 import json
 import os
 import re
 import threading
 import numpy as np
+from collections import OrderedDict
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -24,6 +26,12 @@ class VectorService:
         self._model = None
         self._embedding_client = None
         self._lock = threading.Lock()
+        # LRU of already computed embedding rows, keyed by sha1(text). Shared
+        # by index/search so repeated or overlapping chunks skip the remote
+        # embedding API entirely.
+        self._embedding_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
+        self._embedding_cache_limit = 2048
+        self._embedding_cache_lock = threading.Lock()
         self._milvus = None
         self._milvus_ready = False
 
@@ -92,8 +100,66 @@ class VectorService:
             self._model = SentenceTransformer(model_name)
         return self._model
 
+    def _text_key(self, text: str) -> str:
+        # Bind the key to the model as well: switching the embedding model
+        # changes the dimension and must not reuse stale rows.
+        return hashlib.sha1(f"{self.embedding_model}\x1f{text}".encode("utf-8")).hexdigest()
+
     def _get_embeddings(self, texts: List[str]):
-        """Encode text with the configured remote API or local fallback."""
+        """Encode text with an in-memory LRU cache in front of the provider.
+
+        Only cache misses are sent to the embedding API (in batches of 32),
+        then the rows are spliced back into the original order. The return
+        value keeps the same ``np.ndarray`` shape / normalisation as before.
+        """
+        if not texts:
+            return np.zeros((0, self.embedding_dimension), dtype=np.float32)
+
+        keys = [self._text_key(t) for t in texts]
+        results: List[Optional[np.ndarray]] = [None] * len(texts)
+        missing: List[int] = []
+        with self._embedding_cache_lock:
+            for i, key in enumerate(keys):
+                cached = self._embedding_cache.get(key)
+                if cached is not None:
+                    results[i] = cached
+                    self._embedding_cache.move_to_end(key)
+                else:
+                    missing.append(i)
+
+        if missing:
+            # Deduplicate uncached texts: identical chunks are embedded once.
+            unique_missing: List[int] = []
+            seen_keys = set()
+            for i in missing:
+                if keys[i] not in seen_keys:
+                    seen_keys.add(keys[i])
+                    unique_missing.append(i)
+            computed = self._compute_embeddings([texts[i] for i in unique_missing])
+            computed_by_key = {}
+            with self._embedding_cache_lock:
+                for pos, original_idx in enumerate(unique_missing):
+                    vector = np.asarray(computed[pos], dtype=np.float32)
+                    computed_by_key[keys[original_idx]] = vector
+                    self._embedding_cache[keys[original_idx]] = vector
+                    self._embedding_cache.move_to_end(keys[original_idx])
+                while len(self._embedding_cache) > self._embedding_cache_limit:
+                    self._embedding_cache.popitem(last=False)
+            # Splice computed rows back into every original position / order.
+            for i in missing:
+                results[i] = computed_by_key[keys[i]]
+
+        matrix = np.asarray([r for r in results], dtype=np.float32)
+        if matrix.ndim != 2 or matrix.shape[1] != self.embedding_dimension:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.embedding_dimension}, got {matrix.shape}"
+            )
+        # Re-normalising cached unit vectors is idempotent.
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        return matrix / np.maximum(norms, 1e-12)
+
+    def _compute_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Perform the actual (uncached) provider call for ``texts``."""
         if self.embedding_provider in {"siliconflow", "openai"} and self.embedding_api_key:
             try:
                 from openai import OpenAI

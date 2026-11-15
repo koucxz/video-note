@@ -1,16 +1,20 @@
 """VideoNote main application."""
-import logging
+from __future__ import annotations
+
 import asyncio
+import json
+import logging
+import os
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pathlib import Path
 
 from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router, auth_router
-from .api.ws_manager import ws_manager
 from .core.engine import get_engine
 from .security import AUTH_ENABLED, CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, SESSION_SECRET, valid_csrf, validate_session
 from .rate_limit import allow_request
@@ -27,6 +31,13 @@ async def lifespan(app: FastAPI):
     engine = get_engine()
     logger.info("VideoNote engine ready (ASR=%s)", engine.ai.asr_enabled)
     yield
+    # Each uvicorn worker owns a lazily created process pool; release its
+    # children cleanly on shutdown instead of waiting for interpreter exit.
+    try:
+        from .core.executors import shutdown_pool
+        shutdown_pool()
+    except Exception as exc:  # noqa: BLE001 - shutdown must not fail startup
+        logger.warning("Process pool shutdown failed: %s", exc)
 
 
 app = FastAPI(
@@ -61,7 +72,6 @@ Convert videos into structured notes using AI.
     ]
 )
 
-import os
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -103,6 +113,32 @@ async def auth_middleware(request: Request, call_next):
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
     return await call_next(request)
 
+
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """Log method/path/status/duration for every HTTP request.
+
+    Registered last on purpose: Starlette puts the most recently added
+    user middleware outermost, so this wraps auth/rate-limit/CORS and measures
+    the whole request. Slow requests (>500ms) are logged on one WARNING line.
+    """
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        logger.warning("%s %s 500 %.1fms (unhandled)", request.method, request.url.path, duration_ms)
+        raise
+    duration_ms = (time.perf_counter() - start) * 1000.0
+    response.headers["X-Process-Time"] = f"{duration_ms:.2f}"
+    line = "%s %s %s %.1fms" % (request.method, request.url.path, response.status_code, duration_ms)
+    if duration_ms > 500:
+        logger.warning(line)
+    else:
+        logger.info(line)
+    return response
+
+
 app.include_router(upload_router)
 app.include_router(task_router)
 app.include_router(note_router)
@@ -130,7 +166,17 @@ async def health_check():
         "llm_model": engine.config.provider.model,
         "vlm_model": engine.config.vlm.model,
         "concurrency": engine.config.processing.max_concurrent_tasks,
+        "web_concurrency": os.getenv("WEB_CONCURRENCY", "2"),
     }
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Return shared background-job state (works from any uvicorn worker)."""
+    job = await asyncio.to_thread(get_engine().checkpoint.get_job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return {"data": job}
 
 def _websocket_allowed(websocket: WebSocket) -> bool:
     if not AUTH_ENABLED:
@@ -143,20 +189,56 @@ def _websocket_allowed(websocket: WebSocket) -> bool:
     return origin in {o.strip() for o in cors_origins if o.strip()}
 
 
+def _task_ws_payload(task_id: str, task) -> dict | None:
+    """Same JSON shape as ws_manager.broadcast_task_update previously sent."""
+    if not task:
+        return None
+    return {
+        "task_id": task_id,
+        "status": task.get("status"),
+        "stage": task.get("stage"),
+        "progress": task.get("progress"),
+        "error": task.get("error"),
+        "error_kind": task.get("error_kind", "unknown"),
+    }
+
+
+def _read_task_payload(task_id: str):
+    return _task_ws_payload(task_id, get_engine().checkpoint.get_task(task_id))
+
+
+def _read_all_payloads():
+    cp = get_engine().checkpoint
+    return [_task_ws_payload(t["id"], t) for t in cp.get_all_tasks()]
+
+
+async def _ws_wait(websocket: WebSocket, timeout: float = 1.0) -> None:
+    """Poll cadence that also wakes immediately on a client message/close."""
+    try:
+        await asyncio.wait_for(websocket.receive_text(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass
+
+
 @app.websocket("/ws/task/{task_id}")
 async def websocket_task(websocket: WebSocket, task_id: str):
+    """Cross-worker safe progress: read the shared DB instead of relying on
+    in-process ws_manager broadcasts (which never reach other workers)."""
     if not _websocket_allowed(websocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
-    ws_manager.register(websocket, task_id)
+    last_sent = None
     try:
         while True:
-            await websocket.receive_text()
+            payload = await asyncio.to_thread(_read_task_payload, task_id)
+            if payload and payload != last_sent:
+                await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+                last_sent = payload
+            await _ws_wait(websocket)
     except Exception:
         pass
-    finally:
-        ws_manager.unregister(websocket, task_id)
+
 
 @app.websocket("/ws/all")
 async def websocket_all(websocket: WebSocket):
@@ -164,14 +246,27 @@ async def websocket_all(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     await websocket.accept()
-    ws_manager.register(websocket)
+    last: dict[str, str] = {}
+    baseline_done = False
     try:
         while True:
-            await websocket.receive_text()
+            payloads = await asyncio.to_thread(_read_all_payloads)
+            current: dict[str, str] = {}
+            for payload in payloads:
+                if not payload:
+                    continue
+                sig = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                tid = payload["task_id"]
+                current[tid] = sig
+                # First poll only establishes the baseline; the global feed
+                # (like the old in-process broadcast) reports changes only.
+                if baseline_done and last.get(tid) != sig:
+                    await websocket.send_text(sig)
+            last = current
+            baseline_done = True
+            await _ws_wait(websocket)
     except Exception:
         pass
-    finally:
-        ws_manager.unregister(websocket)
 
 
 @app.exception_handler(Exception)
