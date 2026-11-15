@@ -1,4 +1,4 @@
-﻿version: "3.8"
+version: "3.8"
 
 services:
   backend:
@@ -17,16 +17,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "127.0.0.1:3000:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
 
 volumes:
   vn-data:
