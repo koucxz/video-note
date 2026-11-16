@@ -8,6 +8,7 @@
  */
 import { create } from 'zustand'
 import { runUpload, jobKey, loadSessions, writeSession } from '../lib/uploader'
+import { abortUpload } from '../api/client'
 
 const inFlight = new Set()
 
@@ -66,6 +67,22 @@ export const useUploadStore = create((set, get) => {
     addFiles: (fileList) => {
       const files = Array.from(fileList || [])
       if (!files.length) return []
+
+      // 指纹里带 lastModified，重新下载/拷贝/换机器都会变，于是同一个文件看起来像新的。
+      // 这里把「文件名+大小」相同的旧断点改挂到新指纹上，服务端也会按同样规则找会话，
+      // 两边一起兜住，避免又开一个新会话堆出第二条未完成上传。
+      get().jobs
+        .filter((j) => (j.status === 'resumable' || (j.status === 'failed' && !j.file)))
+        .forEach((job) => {
+          const match = files.find((f) => f.name === job.fileName && f.size === job.fileSize)
+          if (!match) return
+          const nextKey = jobKey(match)
+          if (nextKey === job.key) return
+          const saved = loadSessions()[job.key]
+          if (saved) { writeSession(nextKey, saved); writeSession(job.key, null) }
+          set((s) => ({ jobs: s.jobs.map((j) => (j.key === job.key ? { ...j, key: nextKey } : j)) }))
+        })
+
       const resumable = new Set(
         get().jobs
           .filter((j) => (j.status === 'resumable' || (j.status === 'failed' && !j.file))
@@ -138,13 +155,19 @@ export const useUploadStore = create((set, get) => {
     removeJob: (key) => {
       const job = get().jobs.find((j) => j.key === key)
       if (!job) return
-      if (job.uploadId) writeSession(key, null)
+      // 丢弃条目时把服务端的分片会话一起回收，否则存储管理里会留下一串半成品
+      if (job.uploadId) { writeSession(key, null); abortUpload(job.uploadId).catch(() => {}) }
       set((s) => ({ jobs: s.jobs.filter((j) => j.key !== key) }))
     },
 
     /** 清空未在跑的条目（含排队中的选择），正在上传的不动 */
-    clearSettled: () => set((s) => ({
-      jobs: s.jobs.filter((j) => ['uploading', 'finalizing'].includes(j.status)),
-    })),
+    clearSettled: () => {
+      get().jobs
+        .filter((j) => !['uploading', 'finalizing'].includes(j.status))
+        .forEach((j) => {
+          if (j.uploadId) { writeSession(j.key, null); abortUpload(j.uploadId).catch(() => {}) }
+        })
+      set((s) => ({ jobs: s.jobs.filter((j) => ['uploading', 'finalizing'].includes(j.status)) }))
+    },
   }
 })

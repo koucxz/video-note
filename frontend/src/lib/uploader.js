@@ -6,7 +6,7 @@
  * 就能从服务端记录的 uploaded_parts 接着传。
  */
 import {
-  UPLOAD_CHUNK_SIZE, initUpload, getUploadStatus, putUploadPart, completeUpload,
+  UPLOAD_CHUNK_SIZE, initUpload, getUploadStatus, putUploadPart, completeUpload, abortUpload,
 } from '../api/client'
 
 const PARALLEL = 3
@@ -66,6 +66,9 @@ export async function runUpload({ key, file, options = {}, onProgress, onStage, 
         totalParts = st.total_parts
         done = new Set(st.uploaded_parts || [])
         resumed = true
+      } else {
+        // 会话属于别的文件，别留着占磁盘
+        abortUpload(saved.uploadId)
       }
     } catch {
       // 会话过期（12 小时）或已被清理，退回重新开始
@@ -92,6 +95,8 @@ export async function runUpload({ key, file, options = {}, onProgress, onStage, 
     chunkSize = init.chunk_size
     totalParts = init.total_parts
     done = new Set(init.uploaded_parts || [])
+    // 服务端按「文件名+大小」找回过旧会话时，这里就已经带着已传分片回来了
+    resumed = !!init.resumed
     writeSession(key, {
       uploadId, name: file.name, size: file.size,
       lastModified: file.lastModified || 0,

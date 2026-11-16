@@ -111,6 +111,52 @@ def _uploaded_parts(session: Path, meta: dict) -> list[int]:
     return done
 
 
+def _scan_sessions() -> list[tuple[Path, dict]]:
+    """All readable upload sessions on disk (cheap: one stat + one small json each)."""
+    root = _ts_dir()
+    if not root.exists():
+        return []
+    found: list[tuple[Path, dict]] = []
+    for child in root.iterdir():
+        try:
+            if not child.is_dir():
+                continue
+            with open(child / "meta.json", "r", encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("filename") and meta.get("size") and meta.get("upload_id"):
+            found.append((child, meta))
+    return found
+
+
+def _find_reusable(filename: str, size: int) -> tuple[tuple[Path, dict, list[int]] | None, list[Path]]:
+    """Find the most advanced session for the same (filename, size).
+
+    The client used to key resume state on `name|size|lastModified`, so anything
+    that changed the mtime (re-download, copy, another machine) silently started
+    a brand-new session and the old half-uploaded parts were orphaned — which is
+    why storage management showed several identical "unfinished uploads" of the
+    same video. Matching on the server by name+size makes resume work no matter
+    what the browser remembers, and lets us recycle the losers.
+
+    Returns the best candidate plus every duplicate directory for that file.
+    """
+    best: tuple[Path, dict, list[int]] | None = None
+    duplicates: list[Path] = []
+    for session, meta in _scan_sessions():
+        if meta.get("filename") != filename or int(meta.get("size") or -1) != int(size):
+            continue
+        done = _uploaded_parts(session, meta)
+        if best is None or len(done) > len(best[2]):
+            if best is not None:
+                duplicates.append(best[0])
+            best = (session, meta, done)
+        else:
+            duplicates.append(session)
+    return best, duplicates
+
+
 def _sweep_stale() -> None:
     root = _ts_dir()
     if not root.exists():
@@ -169,6 +215,31 @@ async def init_upload(payload: InitPayload):
 
     chunk_size = max(MIN_CHUNK_SIZE, min(MAX_CHUNK_SIZE, int(payload.chunk_size or DEFAULT_CHUNK_SIZE)))
     total_parts = (payload.size + chunk_size - 1) // chunk_size
+
+    # 同一个文件（文件名+大小一致）之前传了一半：直接接着那个会话传，别再开新目录
+    best, duplicates = await asyncio.to_thread(_find_reusable, payload.filename, payload.size)
+    if best is not None and best[2]:
+        session, meta, done = best
+        for dup in duplicates:
+            await asyncio.to_thread(shutil.rmtree, dup, True)
+        if duplicates:
+            logger.info("Recycled %d duplicate upload session(s) for %s",
+                        len(duplicates), payload.filename)
+        logger.info("Chunked upload resume %s: %s (%d/%d parts already stored)",
+                    meta["upload_id"], payload.filename, len(done), meta["total_parts"])
+        return {
+            "upload_id": meta["upload_id"],
+            "chunk_size": meta["chunk_size"],
+            "total_parts": meta["total_parts"],
+            "uploaded_parts": done,
+            "resumed": True,
+            "max_size": MAX_FILE_SIZE,
+            "max_duration_seconds": MAX_DURATION_SECONDS,
+        }
+
+    # 没有可用分片就清掉同名的空壳/更旧的碎片，只保留这次新建的
+    for dup in duplicates:
+        await asyncio.to_thread(shutil.rmtree, dup, True)
 
     upload_id = uuid.uuid4().hex
     session = _ts_dir() / upload_id
@@ -235,7 +306,7 @@ async def upload_part(upload_id: str, index: int, request: Request):
         except OSError:
             pass
 
-    tmp = session / f".p{index:05d}.tmp"
+    tmp = session / f".p{index:05d}.{uuid.uuid4().hex[:8]}.tmp"
     received = 0
     loop = asyncio.get_running_loop()
     try:
@@ -271,12 +342,28 @@ async def complete_upload(upload_id: str):
         preview = ", ".join(str(i) for i in missing[:10])
         raise HTTPException(400, f"还有 {len(missing)} 个分片未上传（编号 {preview}{'…' if len(missing) > 10 else ''}）")
 
+    # 同一会话可能被两个窗口同时 complete（现在 init 会复用会话，这更容易发生）：
+    # 用一个原子锁文件保证只有一个人合并，另一个拿到明确的提示而不是 500。
+    lock = session / "completing"
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        try:
+            stale = (time.time() - lock.stat().st_mtime) > 600
+        except OSError:
+            stale = False
+        if not stale:
+            raise HTTPException(409, "该文件正在另一处合并，稍后刷新列表即可")
+        lock.unlink(missing_ok=True)
+
     engine = get_engine()
     try:
         file_hash, file_path, is_new = await asyncio.to_thread(_assemble, session, meta)
     except ValueError as exc:
+        lock.unlink(missing_ok=True)
         raise HTTPException(400, str(exc))
     except OSError as exc:
+        lock.unlink(missing_ok=True)
         logger.error("Assemble failed for %s: %s", upload_id, exc)
         raise HTTPException(500, f"合并分片失败：{exc}")
 
