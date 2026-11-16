@@ -5,10 +5,11 @@ import {
   Clock, FileText, ChevronDown, BookOpen, Zap, ListChecks, GraduationCap,
   Sparkles, RefreshCw, TrendingUp, AlertTriangle, BarChart3, Settings,
 } from 'lucide-react'
-import { uploadVideo, getHistoryAll, getTaskStatus, retryTask } from '../api/client'
+import { getHistoryAll, getTaskStatus, retryTask } from '../api/client'
 import { useGlobalWebSocket } from '../hooks/useWebSocket'
 import { useNoteStyles } from '../hooks/useNoteStyles'
 import { useLang } from '../context/LangContext'
+import { useUploadStore } from '../stores/uploadStore'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
@@ -58,19 +59,27 @@ function StatusBadge({ status, t }) {
 
 /* ─── 页面 ─── */
 export default function UploadPage() {
-  const [files, setFiles] = useState([])
   const [lang, setLang] = useState('zh')
   const [noteStyle, setNoteStyle] = useState('standard')
   const [styleOpen, setStyleOpen] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [processingOptions, setProcessingOptions] = useState({ max_concurrent_tasks: 2, keyframe_interval: 30, segment_duration: 300, subtitle_only: false })
-  const [uploading, setUploading] = useState(false)
   const [over, setOver] = useState(false)
   const [sizeError, setSizeError] = useState('')
   const [history, setHistory] = useState([])
-  const [results, setResults] = useState([])
   const ref = useRef(null)
   const styleRef = useRef(null)
+
+  /* 上传任务放在全局 store：上传循环跑在模块层，切页面不会中断也不会丢状态 */
+  const jobs = useUploadStore(s => s.jobs)
+  const addFiles = useUploadStore(s => s.addFiles)
+  const startAll = useUploadStore(s => s.startAll)
+  const removeJob = useUploadStore(s => s.removeJob)
+  const clearSettled = useUploadStore(s => s.clearSettled)
+  const patchByTask = useUploadStore(s => s.patchByTask)
+  const hydrate = useUploadStore(s => s.hydrate)
+  const uploading = jobs.some(j => j.status === 'uploading' || j.status === 'finalizing')
+  const queuedCount = jobs.filter(j => j.status === 'queued').length
   const wsUpdates = useGlobalWebSocket()
   const nav = useNavigate()
   const { t } = useLang()
@@ -84,38 +93,39 @@ export default function UploadPage() {
 
   /* 加载历史 */
   const loadHistory = () => { getHistoryAll().then(setHistory).catch(() => {}) }
-  useEffect(() => { loadHistory() }, [])
+  useEffect(() => {
+    loadHistory()
+    hydrate()   // 把上次没传完的断点显示出来
+  }, [])
 
-  /* WebSocket 实时更新 */
+  /* WebSocket 实时更新：按 task_id 回写到上传条目 */
   useEffect(() => {
     if (!wsUpdates?.length) return
     const latest = wsUpdates[wsUpdates.length - 1]
-    setResults(prev => prev.map(r => r.task_id === latest.task_id ? { ...r, status: latest.status, progress: latest.progress, stage: latest.stage } : r))
+    if (!latest?.task_id) return
+    patchByTask(latest.task_id, { status: latest.status, progress: latest.progress, stage: latest.stage })
   }, [wsUpdates])
 
-  /* 结果变化时同步刷新历史 */
-  useEffect(() => {
-    if (results.some(r => r.status === 'completed' || r.status === 'failed')) loadHistory()
-  }, [results])
+  /* 有任务收尾时刷新右侧历史 */
+  const settledCount = jobs.filter(j => j.status === 'completed' || j.status === 'failed').length
+  useEffect(() => { if (settledCount) loadHistory() }, [settledCount])
 
-  /* 轮询未完成任务 */
+  /* 轮询仍在处理的任务（WS 掉线时的兜底） */
+  const pendingIds = jobs.filter(j => j.task_id && j.status !== 'completed' && j.status !== 'failed')
+    .map(j => j.task_id).join(',')
   useEffect(() => {
-    const pending = results.filter(r => r.task_id && r.status !== 'completed' && r.status !== 'failed')
-    if (!pending.length) return
+    if (!pendingIds) return
+    const ids = pendingIds.split(',')
     const timer = setInterval(async () => {
-      let changed = false
-      const updated = await Promise.all(results.map(async r => {
-        if (!r.task_id || r.status === 'completed' || r.status === 'failed') return r
+      for (const id of ids) {
         try {
-          const s = await getTaskStatus(r.task_id)
-          if (s.status !== r.status || s.progress !== r.progress) changed = true
-          return { ...r, status: s.status, progress: s.progress, stage: s.stage }
-        } catch { return r }
-      }))
-      if (changed) setResults(updated)
+          const s = await getTaskStatus(id)
+          patchByTask(id, { status: s.status, progress: s.progress, stage: s.stage })
+        } catch { /* 忽略单次失败 */ }
+      }
     }, 2000)
     return () => clearInterval(timer)
-  }, [results])
+  }, [pendingIds])
 
   /* 关闭下拉 */
   useEffect(() => {
@@ -134,35 +144,13 @@ export default function UploadPage() {
     setSizeError(tooLarge.length
       ? t('upload.tooLargeFiles', { max: MAX_UPLOAD_LABEL, names: tooLarge.map(f => f.name).join('、') })
       : '')
-    setFiles(p => { const s = new Set(p.map(f => f.name + f.size)); return [...p, ...accepted.filter(f => !s.has(f.name + f.size))] })
-  }, [t])
+    // 同名同大小的断点会被自动接上并继续传
+    if (accepted.length) addFiles(accepted)
+  }, [t, addFiles])
 
-  /* 上传处理 */
+  /* 开始上传（任务进全局队列，离开页面也会继续） */
   const go = async () => {
-    if (!files.length) return
-    setUploading(true)
-    // 先按文件顺序铺满占位行，上传阶段就能把真实字节进度显示出来
-    const out = files.map(f => ({ fileName: f.name, fileSize: f.size, status: 'queued', progress: 0 }))
-    setResults([...out])
-    for (let idx = 0; idx < files.length; idx++) {
-      const f = files[idx]
-      out[idx] = { ...out[idx], status: 'uploading', progress: 0 }
-      setResults([...out])
-      try {
-        const res = await uploadVideo(f, (pct) => {
-          out[idx] = { ...out[idx], progress: Math.min(1, pct / 100) }
-          setResults([...out])
-        }, lang, noteStyle, processingOptions, (stage) => {
-          if (stage === 'finalizing') { out[idx] = { ...out[idx], progress: 1 }; setResults([...out]) }
-        })
-        if (res.already_completed) out[idx] = { ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 }
-        else out[idx] = { ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 }
-      } catch (e) { out[idx] = { ...out[idx], error: e.message, status: 'failed', progress: 0 } }
-      setResults([...out])
-    }
-    setUploading(false)
-    // 刷新历史列表
-    loadHistory()
+    await startAll({ language: lang, note_style: noteStyle, processing_options: processingOptions })
   }
 
   const handleRetry = async (e, taskId) => {
@@ -428,45 +416,54 @@ export default function UploadPage() {
                 </p>
               )}
 
-              {/* 文件列表 */}
-              {files.length > 0 && (
+              {/* 文件列表：任务在全局队列里，切页面回来还在，刷新后可续传 */}
+              {jobs.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{t('upload.selected')} {files.length} {t('upload.files')}</span>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setFiles([]); setResults([]) }}>{t('common.clear')}</Button>
+                    <span className="text-xs text-muted-foreground">{t('upload.selected')} {jobs.length} {t('upload.files')}</span>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearSettled}>{t('common.clear')}</Button>
                   </div>
-                  <div className="max-h-48 space-y-1.5 overflow-y-auto">
-                    {files.map((f, i) => {
-                      const r = results[i]
+                  <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                    {jobs.map(j => {
+                      const busy = j.status === 'uploading' || j.status === 'finalizing'
+                      const showBar = busy || j.status === 'resumable' || (j.task_id && j.status === 'processing')
                       return (
-                        <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 transition-colors">
+                        <div key={j.key} className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 transition-colors">
                           <FileVideo className="h-4 w-4 shrink-0 text-primary" />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{f.name}</p>
+                            <p className="truncate text-sm font-medium">{j.fileName}</p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                              <span className="text-[11px] text-muted-foreground">{(f.size / 1048576).toFixed(1)} MB</span>
-                              {r?.task_id && <StatusBadge status={r.status} t={t} />}
-                              {r?.stage && r.status === 'processing' && (
-                                <span className="text-[11px] text-primary">{t('processing.stage.' + r.stage)}</span>
+                              <span className="text-[11px] text-muted-foreground">{(j.fileSize / 1048576).toFixed(1)} MB</span>
+                              {j.task_id && <StatusBadge status={j.status} t={t} />}
+                              {j.status === 'processing' && j.stage && (
+                                <span className="text-[11px] text-primary">{t('processing.stage.' + j.stage)}</span>
                               )}
-                              {r?.status === 'uploading' && (
-                                <span className="text-[11px] text-primary">{t('upload.uploading')} {Math.round((r.progress || 0) * 100)}%</span>
+                              {j.status === 'uploading' && (
+                                <span className="text-[11px] text-primary">
+                                  {j.resumed ? t('upload.resuming') : t('upload.uploading')} {Math.round((j.progress || 0) * 100)}%
+                                </span>
                               )}
-                              {r?.error && <span className="text-[11px] text-destructive">{r.error}</span>}
+                              {j.status === 'finalizing' && <span className="text-[11px] text-primary">{t('upload.finalizing')}</span>}
+                              {j.status === 'queued' && <span className="text-[11px] text-muted-foreground">{t('status.pending')}</span>}
+                              {j.status === 'resumable' && (
+                                <span className="text-[11px] text-amber-600">{t('upload.resumeHint', { percent: Math.round((j.progress || 0) * 100) })}</span>
+                              )}
+                              {j.error && <span className="text-[11px] text-destructive">{j.error}</span>}
                             </div>
-                            {(r?.status === 'uploading' || (r?.task_id && r.status === 'processing')) && (
+                            {showBar && (
                               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-                                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(r.progress || 0) * 100}%` }} />
+                                <div className={cn('h-full rounded-full transition-all duration-500', j.status === 'resumable' ? 'bg-amber-500' : 'bg-primary')}
+                                  style={{ width: `${Math.max(2, (j.progress || 0) * 100)}%` }} />
                               </div>
                             )}
-                            {r?.task_id && r.status === 'completed' && (
-                              <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => nav(`/note/${r.task_id}`)}>
+                            {j.task_id && j.status === 'completed' && (
+                              <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => nav(`/note/${j.task_id}`)}>
                                 {t('upload.viewNote')} →
                               </Button>
                             )}
                           </div>
-                          {!uploading && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setFiles(p => p.filter((_, j) => j !== i)); setResults(p => p.filter((_, j) => j !== i)) }}>
+                          {!busy && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeJob(j.key)}>
                               <X className="h-3.5 w-3.5" />
                             </Button>
                           )}
@@ -474,14 +471,15 @@ export default function UploadPage() {
                       )
                     })}
                   </div>
+                  {uploading && <p className="text-[11px] text-muted-foreground">{t('upload.background')}</p>}
                 </div>
               )}
 
               {/* 提交按钮 */}
-              <Button className="w-full" size="lg" onClick={go} disabled={!files.length || uploading || stylesLoading || !!stylesError || !selectedStyle}>
+              <Button className="w-full" size="lg" onClick={go} disabled={!queuedCount || uploading || stylesLoading || !!stylesError || !selectedStyle}>
                 {uploading
                   ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('upload.uploading')}</>
-                  : <><Upload className="mr-2 h-4 w-4" />{t('upload.startProcess')}{files.length > 0 && ` (${files.length})`}</>
+                  : <><Upload className="mr-2 h-4 w-4" />{t('upload.startProcess')}{queuedCount > 0 && ` (${queuedCount})`}</>
                 }
               </Button>
             </CardContent>
