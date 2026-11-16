@@ -59,6 +59,8 @@
     "dragHere": "Drop video here",
     "orClick": "or click to browse",
     "multiFiles": "Batch upload supported",
+    "maxSize": "Up to {{max}} per file",
+    "tooLargeFiles": "Skipped files over {{max}}: {{names}}",
     "selected": "Selected",
     "files": "files",
     "startProcess": "Generate Notes",

@@ -59,6 +59,8 @@
     "dragHere": "拖拽视频到这里",
     "orClick": "或点击选择文件",
     "multiFiles": "支持批量上传",
+    "maxSize": "单个文件最大 {{max}}",
+    "tooLargeFiles": "以下文件超过 {{max}} 上限，已跳过：{{names}}",
     "selected": "已选",
     "files": "个",
     "startProcess": "生成笔记",

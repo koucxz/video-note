@@ -238,7 +238,15 @@ class VideoNoteEngine:
         return data
 
     async def _transcribe(self, video_path: str, data: dict) -> dict:
-        data["transcript"] = await self.ai.transcribe_audio(data["audio_path"])
+        # 转写失败不该拖垮整条流水线：没有转写时仍可凭抽帧出笔记，只记一条告警。
+        try:
+            data["transcript"] = await self.ai.transcribe_audio(data["audio_path"])
+        except Exception as error:
+            logger.warning("ASR 转写失败，改用无转写模式继续：%s", error)
+            data["transcript"] = {
+                "text": "", "segments": [], "language": data.get("language", "zh"),
+                "asr_error": str(error)[:300],
+            }
         return data
 
     async def _generate_outline(self, video_path: str, data: dict) -> dict:

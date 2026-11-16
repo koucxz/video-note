@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
@@ -12,6 +13,10 @@ from typing import List, Optional
 from ..core.token_usage import ensure_budget, record_tokens
 
 logger = logging.getLogger(__name__)
+
+# 语音转写服务普遍对单次上传的音频时长/体积有上限，长视频必须切块后逐段转写再拼接。
+# 0 表示不切块，整段一次请求。
+ASR_CHUNK_SECONDS = int(os.getenv("ASR_CHUNK_SECONDS", "1200"))
 
 
 def _usage_total(response) -> int:
@@ -151,11 +156,41 @@ class OpenAIProvider(AIProvider):
     def asr_enabled(self) -> bool:
         return self._asr_enabled
 
+    async def _audio_duration(self, audio_path: str) -> float:
+        """ffprobe 读时长：决定是否需要把长音频切成多段再转写。"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", audio_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            stdout, _ = await proc.communicate()
+            return float(json.loads(stdout or b"{}").get("format", {}).get("duration") or 0)
+        except Exception as error:
+            logger.warning("ffprobe failed for %s: %s", audio_path, error)
+            return 0.0
+
+    async def _split_audio(self, audio_path: str, duration: float) -> List[str]:
+        """按 ASR_CHUNK_SECONDS 切块（stream copy，不重新编码）。失败返回空表示整段转写。"""
+        if ASR_CHUNK_SECONDS <= 0 or duration <= ASR_CHUNK_SECONDS * 1.1:
+            return []
+        out_dir = Path(audio_path).parent / f"{Path(audio_path).stem}-asr"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error", "-i", audio_path,
+            "-f", "segment", "-segment_time", str(ASR_CHUNK_SECONDS),
+            "-reset_timestamps", "1", "-c", "copy", str(out_dir / "part_%03d.m4a"),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, stderr = await proc.communicate()
+        parts = sorted(str(path) for path in out_dir.glob("part_*.m4a"))
+        if proc.returncode != 0 or not parts:
+            logger.warning("ASR 切块失败（code=%s），改为整段转写：%s", proc.returncode, stderr[-200:])
+            return []
+        logger.info("ASR 切块：%.0fs 音频 → %d 段", duration, len(parts))
+        return parts
+
     @with_retry(max_retries=3, base_delay=3.0)
-    async def transcribe_audio(self, audio_path: str, language: Optional[str] = None) -> dict:
-        if not self._asr_enabled:
-            return {"text": "", "segments": [], "language": language or "zh", "asr_skipped": True}
-        logger.info("Transcribing: %s", audio_path)
+    async def _transcribe_once(self, audio_path: str, language: Optional[str] = None) -> dict:
         with open(audio_path, "rb") as fh:
             response = await self._asr.audio.transcriptions.create(
                 model=self.asr_model, file=fh, language=language, response_format="verbose_json")
@@ -165,6 +200,38 @@ class OpenAIProvider(AIProvider):
             "segments": [{"start": getattr(s, "start", 0), "end": getattr(s, "end", 0), "text": getattr(s, "text", "")} for s in segments],
             "language": getattr(response, "language", language or "zh"),
         }
+
+    async def transcribe_audio(self, audio_path: str, language: Optional[str] = None) -> dict:
+        if not self._asr_enabled:
+            return {"text": "", "segments": [], "language": language or "zh", "asr_skipped": True}
+        logger.info("Transcribing: %s", audio_path)
+        duration = await self._audio_duration(audio_path)
+        parts = await self._split_audio(audio_path, duration)
+        if not parts:
+            return await self._transcribe_once(audio_path, language)
+        texts: List[str] = []
+        segments: List[dict] = []
+        used_language = language or "zh"
+        try:
+            for index, part in enumerate(parts):
+                result = await self._transcribe_once(part, language)
+                text = (result.get("text") or "").strip()
+                if text:
+                    texts.append(text)
+                segments.extend(result.get("segments") or [])
+                used_language = result.get("language") or used_language
+                logger.info("ASR 第 %d/%d 段完成（%d 字）", index + 1, len(parts), len(text))
+        finally:
+            for part in parts:
+                try:
+                    os.unlink(part)
+                except OSError:
+                    pass
+            try:
+                os.rmdir(Path(parts[0]).parent)
+            except OSError:
+                pass
+        return {"text": "\n".join(texts), "segments": segments, "language": used_language, "asr_chunks": len(parts)}
 
     @with_retry(max_retries=3, base_delay=3.0)
     async def analyze_frames(self, frame_paths: List[str], prompt: str) -> str:

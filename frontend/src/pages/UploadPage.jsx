@@ -20,6 +20,9 @@ import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '../com
 import { cn } from '../lib/utils'
 
 /* ─── 常量 ─── */
+// 与服务端 MAX_UPLOAD_BYTES 保持一致（超限时前端直接提示，不上传）
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+const MAX_UPLOAD_LABEL = '2GB'
 const STYLE_META = {
   standard:  { icon: BookOpen,    color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200' },
   summary:   { icon: Zap,         color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200' },
@@ -63,6 +66,7 @@ export default function UploadPage() {
   const [processingOptions, setProcessingOptions] = useState({ max_concurrent_tasks: 2, keyframe_interval: 30, segment_duration: 300, subtitle_only: false })
   const [uploading, setUploading] = useState(false)
   const [over, setOver] = useState(false)
+  const [sizeError, setSizeError] = useState('')
   const [history, setHistory] = useState([])
   const [results, setResults] = useState([])
   const ref = useRef(null)
@@ -122,9 +126,16 @@ export default function UploadPage() {
 
   /* 添加文件 */
   const add = useCallback((fl) => {
-    const vf = Array.from(fl).filter(f => /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v)$/i.test(f.name))
-    setFiles(p => { const s = new Set(p.map(f => f.name + f.size)); return [...p, ...vf.filter(f => !s.has(f.name + f.size))] })
-  }, [])
+    const list = Array.from(fl)
+    const vf = list.filter(f => /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v)$/i.test(f.name))
+    // 超出体积上限的文件在本地就拦下：整段上传完才被服务端拒绝，用户白等几分钟
+    const tooLarge = vf.filter(f => f.size > MAX_UPLOAD_BYTES)
+    const accepted = vf.filter(f => f.size <= MAX_UPLOAD_BYTES)
+    setSizeError(tooLarge.length
+      ? t('upload.tooLargeFiles', { max: MAX_UPLOAD_LABEL, names: tooLarge.map(f => f.name).join('、') })
+      : '')
+    setFiles(p => { const s = new Set(p.map(f => f.name + f.size)); return [...p, ...accepted.filter(f => !s.has(f.name + f.size))] })
+  }, [t])
 
   /* 上传处理 */
   const go = async () => {
@@ -398,8 +409,15 @@ export default function UploadPage() {
                   <Plus className="h-5 w-5 text-primary" />
                 </div>
                 <p className="text-sm font-semibold">{t('upload.dragHere')}</p>
-                <p className="text-xs text-muted-foreground">{t('upload.orClick')} · {t('upload.multiFiles')}</p>
+                <p className="text-xs text-muted-foreground">{t('upload.orClick')} · {t('upload.multiFiles')} · {t('upload.maxSize', { max: MAX_UPLOAD_LABEL })}</p>
               </div>
+
+              {sizeError && (
+                <p className="flex items-start gap-1.5 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{sizeError}</span>
+                </p>
+              )}
 
               {/* 文件列表 */}
               {files.length > 0 && (

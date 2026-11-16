@@ -17,6 +17,13 @@ MAX_FILE_SIZE = int(__import__("os").getenv("MAX_UPLOAD_BYTES", str(512 * 1024 *
 MAX_DURATION_SECONDS = int(__import__("os").getenv("MAX_VIDEO_DURATION_SECONDS", str(3600)))
 
 
+def _human_size(num_bytes: int) -> str:
+    """上限提示用：2GB / 800MB 这种读法，避免让用户自己换算字节数。"""
+    if num_bytes >= 1024 ** 3:
+        return f"{num_bytes / 1024 ** 3:.0f}GB"
+    return f"{num_bytes / 1024 ** 2:.0f}MB"
+
+
 @router.post("/api/upload", tags=["upload"],
     summary="Upload and process video",
     description="Upload a video file for AI-powered note generation. Supports deduplication - uploading the same file twice returns the existing result.")
@@ -27,12 +34,12 @@ async def upload_video(
     processing_options: str = Form(default="{}"),
 ):
     if not file.filename:
-        raise HTTPException(400, "No file selected")
+        raise HTTPException(400, "未选择文件")
 
     ext = Path(file.filename).suffix.lower()
     allowed = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
     if ext not in allowed:
-        raise HTTPException(400, f"Unsupported format: {ext}")
+        raise HTTPException(400, f"不支持的视频格式：{ext}")
 
     if language not in ("zh", "en"):
         language = "zh"
@@ -54,7 +61,7 @@ async def upload_video(
     # Check file size
     content_length = file.size if hasattr(file, "size") else None
     if content_length and content_length > MAX_FILE_SIZE:
-        raise HTTPException(413, f"File too large; max {MAX_FILE_SIZE / 1024 / 1024:.0f}MB")
+        raise HTTPException(413, f"文件超过 {_human_size(MAX_FILE_SIZE)} 上限，请先压缩或裁剪视频")
 
     try:
         engine = get_engine()
@@ -74,7 +81,7 @@ async def upload_video(
                 "already_completed": True,
                 "language": language,
                 "note_style": note_style,
-                "message": "File already processed - returning existing note",
+                "message": "文件已处理过，直接返回已有笔记",
             }
 
         # Check video duration
@@ -87,9 +94,9 @@ async def upload_video(
             raise HTTPException(400, "无法读取视频文件，请上传有效的视频文件")
         duration_warning = None
         if duration > MAX_DURATION_SECONDS:
-            raise HTTPException(413, f"Video is too long; maximum is {MAX_DURATION_SECONDS // 60} minutes")
+            raise HTTPException(413, f"视频时长超过 {MAX_DURATION_SECONDS // 60} 分钟上限（当前 {duration / 60:.0f} 分钟）")
         elif duration > MAX_DURATION_SECONDS * 0.8:
-            duration_warning = f"Video is {duration/60:.0f} minutes long. Processing may take several minutes."
+            duration_warning = f"视频时长 {duration/60:.0f} 分钟，处理可能需要较长时间。"
 
         task = engine.create_task(
             file.filename, file_hash, file_path,
