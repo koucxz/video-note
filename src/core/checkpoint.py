@@ -218,6 +218,28 @@ class CheckpointManager:
             row = cur.fetchone()
             return self._row_to_dict(cur, row) if row else None
 
+    def count_other_tasks_by_hash(self, video_hash: str, exclude_id: str) -> int:
+        """How many *other* tasks still reference the same uploaded file.
+
+        Dedup stores one physical file per content hash, so two uploads of the
+        same video share `{hash}.mp4`. Any status counts here (not just
+        completed): deleting the task that happens to be in flight must not
+        unlink the file out from under its sibling.
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE video_hash = ? AND id != ?",
+                (video_hash, exclude_id))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+
+    def active_video_hashes(self) -> set[str]:
+        """Hashes whose video file is still needed by a running/queued task."""
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT DISTINCT video_hash FROM tasks WHERE status IN ('processing', 'pending', 'paused')")
+            return {r[0] for r in cur.fetchall() if r[0]}
+
     def update_task(self, task_id: str, **kwargs) -> None:
         if not kwargs:
             return

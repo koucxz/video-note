@@ -107,7 +107,19 @@
     "pause": "暂停",
     "resume": "继续",
     "viewNote": "查看笔记",
-    "paused": "已暂停"
+    "paused": "已暂停",
+    "detailTitle": "处理进展",
+    "detailSubtitle": "列表每 3 秒自动刷新，也可以手动刷新",
+    "currentStage": "当前阶段",
+    "progress": "进度",
+    "elapsed": "已用时",
+    "stageDone": "已完成",
+    "stageCurrent": "进行中",
+    "stagePending": "待开始",
+    "stageQueued": "排队中",
+    "openDetail": "查看进展",
+    "refresh": "刷新",
+    "finishedHint": "这条任务已经处理完成"
   },
   "status": {
     "completed": "已完成",

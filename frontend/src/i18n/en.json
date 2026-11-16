@@ -107,7 +107,19 @@
     "pause": "Pause",
     "resume": "Resume",
     "viewNote": "View",
-    "paused": "Paused"
+    "paused": "Paused",
+    "detailTitle": "Processing progress",
+    "detailSubtitle": "Refreshes every 3 seconds; you can also refresh manually",
+    "currentStage": "Current stage",
+    "progress": "Progress",
+    "elapsed": "Elapsed",
+    "stageDone": "Done",
+    "stageCurrent": "Running",
+    "stagePending": "Waiting",
+    "stageQueued": "Queued",
+    "openDetail": "View progress",
+    "refresh": "Refresh",
+    "finishedHint": "This task has already finished"
   },
   "status": {
     "completed": "Done",

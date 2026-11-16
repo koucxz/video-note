@@ -141,14 +141,23 @@ export default function UploadPage() {
   const go = async () => {
     if (!files.length) return
     setUploading(true)
-    setResults([])
-    const out = []
-    for (const f of files) {
+    // 先按文件顺序铺满占位行，上传阶段就能把真实字节进度显示出来
+    const out = files.map(f => ({ fileName: f.name, fileSize: f.size, status: 'queued', progress: 0 }))
+    setResults([...out])
+    for (let idx = 0; idx < files.length; idx++) {
+      const f = files[idx]
+      out[idx] = { ...out[idx], status: 'uploading', progress: 0 }
+      setResults([...out])
       try {
-        const res = await uploadVideo(f, () => {}, lang, noteStyle, processingOptions)
-        if (res.already_completed) out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 })
-        else out.push({ ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 })
-      } catch (e) { out.push({ fileName: f.name, fileSize: f.size, error: e.message, status: 'failed', progress: 0 }) }
+        const res = await uploadVideo(f, (pct) => {
+          out[idx] = { ...out[idx], progress: Math.min(1, pct / 100) }
+          setResults([...out])
+        }, lang, noteStyle, processingOptions, (stage) => {
+          if (stage === 'finalizing') { out[idx] = { ...out[idx], progress: 1 }; setResults([...out]) }
+        })
+        if (res.already_completed) out[idx] = { ...res, fileName: f.name, fileSize: f.size, status: 'completed', progress: 1 }
+        else out[idx] = { ...res, fileName: f.name, fileSize: f.size, status: 'pending', progress: 0 }
+      } catch (e) { out[idx] = { ...out[idx], error: e.message, status: 'failed', progress: 0 } }
       setResults([...out])
     }
     setUploading(false)
@@ -440,9 +449,12 @@ export default function UploadPage() {
                               {r?.stage && r.status === 'processing' && (
                                 <span className="text-[11px] text-primary">{t('processing.stage.' + r.stage)}</span>
                               )}
+                              {r?.status === 'uploading' && (
+                                <span className="text-[11px] text-primary">{t('upload.uploading')} {Math.round((r.progress || 0) * 100)}%</span>
+                              )}
                               {r?.error && <span className="text-[11px] text-destructive">{r.error}</span>}
                             </div>
-                            {r?.task_id && r.status === 'processing' && (
+                            {(r?.status === 'uploading' || (r?.task_id && r.status === 'processing')) && (
                               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(r.progress || 0) * 100}%` }} />
                               </div>

@@ -1,10 +1,53 @@
 """Task API with error_kind in response."""
+import logging
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Body
 from ..core.engine import get_engine
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_ACTIVE_STATUSES = ("processing", "pending")
+
+
+def _maybe_delete_video(engine, task: dict, task_id: str) -> None:
+    """Unlink the uploaded video only when it is safe to do so.
+
+    Files are deduplicated by content hash, so several tasks can point at one
+    physical `{hash}.mp4`. Deleting a task used to look for a *completed*
+    sibling only - an in-flight duplicate therefore deleted the shared file and
+    made the other task die at keyframe extraction with "No such file or
+    directory". Count every status, and cancel the task first so the worker
+    stops touching the file before it disappears.
+    """
+    video_path = task.get("video_path")
+    if not video_path:
+        return
+    video_hash = task.get("video_hash")
+    if not video_hash:
+        logger.info("Keeping %s: task %s has no video_hash", video_path, task_id)
+        return
+    try:
+        shared = engine.checkpoint.count_other_tasks_by_hash(video_hash, task_id)
+    except Exception as exc:  # noqa: BLE001 - never fail a delete on this check
+        logger.warning("Hash reference check failed for %s: %s", task_id, exc)
+        return
+    if shared:
+        logger.info("Keeping %s: %d other task(s) share hash %s", video_path, shared, video_hash)
+        return
+    if task.get("status") in _ACTIVE_STATUSES:
+        try:
+            engine.cancel_task(task_id)
+        except Exception:
+            pass
+    try:
+        p = Path(video_path)
+        if p.exists():
+            p.unlink()
+    except OSError:
+        pass
 
 
 @router.get("/api/task/{task_id}/status", tags=["tasks"],
@@ -89,16 +132,7 @@ async def delete_task(task_id: str):
             pass
     
     # Delete video file (only if no other tasks reference it)
-    if task.get("video_path"):
-        video_hash = task.get("video_hash")
-        other = engine.checkpoint.find_task_by_hash(video_hash) if video_hash else None
-        if not other or other["id"] == task_id:
-            try:
-                p = Path(task["video_path"])
-                if p.exists():
-                    p.unlink()
-            except OSError:
-                pass
+    _maybe_delete_video(engine, task, task_id)
     
     try:
         if getattr(engine, "vector", None) is not None:
@@ -124,16 +158,7 @@ def _delete_one(engine, task_id: str):
         except OSError:
             pass
 
-    if task.get("video_path"):
-        video_hash = task.get("video_hash")
-        other = engine.checkpoint.find_task_by_hash(video_hash) if video_hash else None
-        if not other or other["id"] == task_id:
-            try:
-                p = Path(task["video_path"])
-                if p.exists():
-                    p.unlink()
-            except OSError:
-                pass
+    _maybe_delete_video(engine, task, task_id)
 
     try:
         if getattr(engine, "vector", None) is not None:

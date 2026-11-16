@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom"
 import {
   Trash2, RefreshCw, Loader2, Clock, CheckCircle2, XCircle,
   Search, Download, CheckSquare, Square,
-  MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play, Pencil,
+  MoreVertical, ExternalLink, Eye, RotateCcw, Pause, Play, Pencil, Activity,
 } from "lucide-react"
-import { downloadNoteMd, downloadNotePdf, downloadNotesZip } from "../api/client"
+import { downloadNoteMd, downloadNotePdf, downloadNotesZip, getTaskStatus } from "../api/client"
 import { useTaskStore } from "../stores/taskStore"
 import { useLang } from "../context/LangContext"
 import { useGlobalWebSocket } from "../hooks/useWebSocket"
@@ -14,6 +14,8 @@ import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
+import { Progress } from "../components/ui/progress"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu"
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "../components/ui/tooltip"
 import { cn } from "../lib/utils"
@@ -25,6 +27,12 @@ const statusConfig = {
   pending: { icon: Clock, variant: "secondary", color: "text-muted-foreground", bg: "bg-muted" },
   paused: { icon: Pause, variant: "secondary", color: "text-amber-500", bg: "bg-amber-500/10" },
 }
+
+// 与后端 ProcessingStage 的顺序一致（ASR 关闭时后端会跳过 transcribing）
+const STAGE_ORDER = [
+  "extracting_audio", "extracting_subtitles", "transcribing",
+  "generating_outline", "extracting_keyframes", "analyzing_content", "generating_note",
+]
 
 function HistoryPage() {
   const {
@@ -49,6 +57,47 @@ function HistoryPage() {
     patchTask(latest.task_id, { status: latest.status, progress: latest.progress, stage: latest.stage })
     if (latest.status === "completed" || latest.status === "failed") fetchTasks()
   }, [wsUpdates])
+
+  /* 进行中任务的进展详情：打开后每 3 秒拉一次最新状态（WS 掉线也能跟上） */
+  const [detail, setDetail] = useState(null)
+  const [live, setLive] = useState(null)
+
+  useEffect(() => {
+    if (!detail?.task_id) { setLive(null); return }
+    let stopped = false
+    const pull = async () => {
+      try {
+        const s = await getTaskStatus(detail.task_id)
+        if (stopped) return
+        setLive(s)
+        patchTask(detail.task_id, { status: s.status, progress: s.progress, stage: s.stage })
+        if (s.status === "completed" || s.status === "failed") fetchTasks()
+      } catch { /* 网络抖动就保留上一帧，不打断阅读 */ }
+    }
+    pull()
+    const timer = setInterval(pull, 3000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [detail?.task_id])
+
+  const stageLabel = (stage) => {
+    if (!stage) return "-"
+    const key = `processing.stage.${stage}`
+    const label = t(key)
+    if (label !== key) return label
+    if (stage === "queued") return t('history.stageQueued')
+    return stage
+  }
+
+  const elapsedText = (item) => {
+    if (!item?.createdAt) return "-"
+    const start = new Date(item.createdAt).getTime()
+    if (isNaN(start)) return "-"
+    const finished = item.status === "completed" || item.status === "failed"
+    const end = finished ? new Date(item.completed_at || Date.now()).getTime() : Date.now()
+    const sec = Math.max(0, Math.round((end - start) / 1000))
+    const m = Math.floor(sec / 60), s = sec % 60
+    return lang === "zh" ? (m ? `${m} 分 ${String(s).padStart(2, "0")} 秒` : `${s} 秒`) : (m ? `${m}m ${s}s` : `${s}s`)
+  }
 
   const handleSearch = (val) => {
     setFilter("search", val)
@@ -181,8 +230,10 @@ function HistoryPage() {
                   const sc = statusConfig[item.status] || statusConfig.pending
                   const Icon = sc.icon
                   const canView = item.status === "completed"
+                  const inFlight = item.status === "processing" || item.status === "pending" || item.status === "paused"
                   return (
-                    <tr key={item.task_id} className={cn("border-b transition-colors hover:bg-muted/30", canView && "cursor-pointer")} onClick={() => canView && navigate(`/note/${item.task_id}`)}>
+                    <tr key={item.task_id} className={cn("border-b transition-colors hover:bg-muted/30", (canView || inFlight) && "cursor-pointer")}
+                      onClick={() => { if (canView) navigate(`/note/${item.task_id}`); else if (inFlight) { setDetail(item); setLive(null) } }}>
                       <td className="px-3 py-2"><button onClick={e => { e.stopPropagation(); toggleSelect(item.task_id) }} className="text-muted-foreground hover:text-foreground">{selected.has(item.task_id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
@@ -195,7 +246,18 @@ function HistoryPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="w-28 px-3 py-2"><Badge variant={sc.variant} className="whitespace-nowrap">{t(`status.${item.status}`)}</Badge></td>
+                      <td className="w-40 px-3 py-2">
+                        <Badge variant={sc.variant} className="whitespace-nowrap">{t(`status.${item.status}`)}</Badge>
+                        {inFlight && item.stage && (
+                          <p className="mt-1 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+                            <Activity className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{stageLabel(item.stage)}</span>
+                            {item.status === "processing" && (
+                              <span className="shrink-0 text-primary">{Math.round((item.progress || 0) * 100)}%</span>
+                            )}
+                          </p>
+                        )}
+                      </td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{t('noteStyle.' + (item.note_style || '')) || item.note_style || "-"}</td>
                       <td className="px-3 py-2 text-right font-mono text-xs">{item.totalTokens || "-"}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{formatDate(item.createdAt)}</td>
@@ -203,6 +265,7 @@ function HistoryPage() {
                         <div className="flex items-center justify-end gap-1">
                           {canView && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/note/${item.task_id}`) }}><Eye className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('history.viewNote')}</TooltipContent></Tooltip>}
                           {item.status === "failed" && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handleRetry(e, item.task_id)}><RotateCcw className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('common.retry')}</TooltipContent></Tooltip>}
+                          {inFlight && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); setDetail(item); setLive(null) }}><Activity className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent>{t('history.openDetail')}</TooltipContent></Tooltip>}
                           {(item.status === "processing" || item.status === "paused") && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => handlePauseResume(e, item)}>{item.status === "paused" ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}</Button></TooltipTrigger><TooltipContent>{item.status === "paused" ? t('history.resume') : t('history.pause')}</TooltipContent></Tooltip>}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
@@ -230,6 +293,92 @@ function HistoryPage() {
             <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => fetchTasks(page + 1)}>{">"}</Button>
           </div>
         )}
+
+        {/* 进行中任务的进展详情：点行或点「查看进展」打开，3 秒自动刷新 */}
+        <Dialog open={!!detail} onOpenChange={(open) => { if (!open) { setDetail(null); setLive(null) } }}>
+          <DialogContent className="max-w-lg">
+            {detail && (() => {
+              const v = { ...detail, ...(live || {}) }
+              const pct = Math.round((v.progress || 0) * 100)
+              const idx = STAGE_ORDER.indexOf(v.stage)
+              const finished = v.status === "completed"
+              const sc = statusConfig[v.status] || statusConfig.pending
+              const Icon = sc.icon
+              return (
+                <>
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 pr-6 text-base">
+                      <Icon className={cn("h-4 w-4 shrink-0", sc.color, v.status === "processing" && "animate-spin")} />
+                      <span className="truncate">{v.videoName || v.filename}</span>
+                    </DialogTitle>
+                    <DialogDescription>{t('history.detailSubtitle')}</DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{t('history.currentStage')}</span>
+                        <span className="font-medium text-foreground">{stageLabel(v.stage)}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-3">
+                        <Progress value={finished ? 100 : pct} className="h-2" />
+                        <span className="w-10 shrink-0 text-right font-mono text-xs text-muted-foreground">{finished ? 100 : pct}%</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>{t('history.elapsed')}: {elapsedText(v)}</span>
+                        <Badge variant={sc.variant} className="whitespace-nowrap">{t(`status.${v.status}`)}</Badge>
+                      </div>
+                    </div>
+
+                    {v.error && (
+                      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                        <p className="text-xs font-medium text-destructive">{t('status.failed')}</p>
+                        <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">{v.error}</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      {STAGE_ORDER.map((s, i) => {
+                        const state = finished || (idx >= 0 && i < idx) ? "done" : i === idx ? "current" : "pending"
+                        return (
+                          <div key={s} className={cn("flex items-center gap-2 rounded-md px-2 py-1 text-xs",
+                            state === "current" && "bg-primary/5",
+                            state === "pending" && "text-muted-foreground")}>
+                            {state === "done" && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+                            {state === "current" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+                            {state === "pending" && <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-muted-foreground/30" />}
+                            <span className="flex-1 truncate">{stageLabel(s)}</span>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {state === "done" ? t('history.stageDone') : state === "current" ? t('history.stageCurrent') : t('history.stagePending')}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      {(v.status === "processing" || v.status === "paused") && (
+                        <Button size="sm" variant="outline" onClick={() => (v.status === "paused" ? resumeTask(v.task_id) : pauseTask(v.task_id))}>
+                          {v.status === "paused" ? <><Play className="mr-1.5 h-3.5 w-3.5" />{t('history.resume')}</> : <><Pause className="mr-1.5 h-3.5 w-3.5" />{t('history.pause')}</>}
+                        </Button>
+                      )}
+                      {v.status === "failed" && (
+                        <Button size="sm" variant="outline" onClick={() => retryTask(v.task_id)}>
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />{t('common.retry')}
+                        </Button>
+                      )}
+                      {finished && (
+                        <Button size="sm" onClick={() => navigate(`/note/${v.task_id}`)}>
+                          <Eye className="mr-1.5 h-3.5 w-3.5" />{t('history.viewNote')}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )
+            })()}
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   )

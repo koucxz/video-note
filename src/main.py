@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pathlib import Path
 
-from .api import upload_router, task_router, note_router, storage_router, model_config_router, settings_router, auth_router
+from .api import upload_router, upload_chunked_router, task_router, note_router, storage_router, model_config_router, settings_router, auth_router
 from .core.engine import get_engine
 from .security import (
     AUTH_ENABLED, CSRF_COOKIE, CSRF_HEADER, SESSION_SECRET,
@@ -161,6 +161,7 @@ app.add_middleware(
 )
 
 app.include_router(upload_router)
+app.include_router(upload_chunked_router)
 app.include_router(task_router)
 app.include_router(note_router)
 app.include_router(storage_router)

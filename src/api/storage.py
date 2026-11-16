@@ -58,34 +58,42 @@ async def clean_uploads(body: CleanRequest = CleanRequest()):
     engine = get_engine()
     upload_dir = Path(engine.config.storage.upload_dir)
     hashes = body.hashes
-    
+
     if not upload_dir.exists():
-        return {"deleted": 0, "freed_bytes": 0}
-    
+        return {"deleted": 0, "freed_bytes": 0, "skipped": 0}
+
+    # 正在排队/处理的任务还要拿它当素材，清掉就等于把源头抽走（曾导致关键帧阶段报文件不存在）
+    try:
+        active = engine.checkpoint.active_video_hashes()
+    except Exception:
+        active = set()
+
     deleted = 0
     freed = 0
-    
+    skipped = 0
+
+    def _clean_one(f: Path) -> None:
+        nonlocal deleted, freed, skipped
+        if f.stem in active:
+            skipped += 1
+            return
+        try:
+            size = f.stat().st_size
+            f.unlink()
+        except OSError:
+            return
+        deleted += 1
+        freed += size
+
     if hashes is None:
         for f in upload_dir.iterdir():
             if f.is_file() and f.suffix.lower() in VALID_VIDEO_EXT:
-                size = f.stat().st_size
-                try:
-                    f.unlink()
-                    deleted += 1
-                    freed += size
-                except OSError:
-                    pass
+                _clean_one(f)
     else:
         for h in hashes:
             for ext in VALID_VIDEO_EXT:
                 f = upload_dir / f"{h}{ext}"
                 if f.exists():
-                    size = f.stat().st_size
-                    try:
-                        f.unlink()
-                        deleted += 1
-                        freed += size
-                    except OSError:
-                        pass
-    
-    return {"deleted": deleted, "freed_bytes": freed}
+                    _clean_one(f)
+
+    return {"deleted": deleted, "freed_bytes": freed, "skipped": skipped}

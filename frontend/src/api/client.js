@@ -158,18 +158,73 @@ const pollJob = async (jobId) => {
   throw new Error('Background job timed out')
 }
 
-// ── Upload ──
-export const uploadVideo = async (file, onProgress, language = 'zh', noteStyle = 'standard', processingOptions = {}) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('language', language);
-  formData.append('note_style', noteStyle);
-  formData.append('processing_options', JSON.stringify(processingOptions));
-  const response = await api.post('/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (e) => { if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total)); }
-  });
-  return response.data;
+// ── Upload（分片） ──
+// 单个请求传 2GB 要撑五分钟：撞前端超时、断一次从 0 重来、服务端还得先把整个
+// body 落到临时文件才能校验。拆成 8MB 分片后可以并行、单块重试、按字节报进度。
+const CHUNK_SIZE = 8 * 1024 * 1024
+const UPLOAD_PARALLEL = 3
+const PART_RETRIES = 3
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+const putPart = async (uploadId, index, blob) => {
+  let lastErr
+  for (let attempt = 1; attempt <= PART_RETRIES; attempt++) {
+    try {
+      await api.put(`/upload/${uploadId}/part/${index}`, blob, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        timeout: 180000,
+        transformRequest: [(d) => d],
+      })
+      return
+    } catch (e) {
+      lastErr = e
+      const status = e.response?.status
+      // 4xx 除了超时/限流都不值得重试
+      if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) throw e
+      if (attempt < PART_RETRIES) await sleep(500 * attempt)
+    }
+  }
+  throw lastErr
+}
+
+export const uploadVideo = async (file, onProgress, language = 'zh', noteStyle = 'standard', processingOptions = {}, onStage) => {
+  const init = await api.post('/upload/init', {
+    filename: file.name,
+    size: file.size,
+    chunk_size: CHUNK_SIZE,
+    language,
+    note_style: noteStyle,
+    processing_options: JSON.stringify(processingOptions || {}),
+  })
+  const { upload_id, chunk_size, total_parts } = init.data
+  const total = file.size || 1
+  let uploaded = 0
+  const report = () => { onProgress?.(Math.min(99, Math.round((uploaded / total) * 100))) }
+  report()
+
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < total_parts) {
+      const index = cursor++
+      const start = index * chunk_size
+      const blob = file.slice(start, Math.min(start + chunk_size, file.size))
+      await putPart(upload_id, index, blob)
+      uploaded += blob.size
+      report()
+    }
+  }
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, total_parts) }, worker))
+    onStage?.('finalizing')
+    const res = await api.post(`/upload/${upload_id}/complete`, null, { timeout: 300000 })
+    onProgress?.(100)
+    return res.data
+  } catch (e) {
+    // 放弃这次会话，别把半截文件留在服务器上等 12 小时自动清理
+    try { await api.delete(`/upload/${upload_id}`) } catch {}
+    throw e
+  }
 };
 
 // ── Task ──
