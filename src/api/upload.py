@@ -67,6 +67,23 @@ def normalize_note_style(note_style: str) -> str:
     return note_style if note_style in VALID_NOTE_STYLES else DEFAULT_NOTE_STYLE
 
 
+def _discard_upload(engine, file_hash: str, file_path: Path) -> None:
+    """Drop a rejected upload, unless another task still shares the file.
+
+    Uploads are deduplicated by content hash, so two identical uploads point at
+    one `{hash}.mp4`. Unlinking on a rejection would break the sibling task.
+    """
+    try:
+        if file_hash and engine.checkpoint.count_other_tasks_by_hash(file_hash, ""):
+            return
+    except Exception:  # noqa: BLE001 - cleanup must never mask the real error
+        return
+    try:
+        file_path.unlink()
+    except OSError:
+        pass
+
+
 async def finalize_upload(engine, filename: str, file_hash: str, file_path: Path, is_new: bool,
                           language: str, note_style: str, overrides: dict) -> dict:
     """Common tail shared by every upload entry point.
@@ -88,18 +105,12 @@ async def finalize_upload(engine, filename: str, file_hash: str, file_path: Path
 
     duration = await get_video_duration(str(file_path))
     if duration <= 0:
-        try:
-            file_path.unlink()
-        except OSError:
-            pass
+        _discard_upload(engine, file_hash, file_path)
         raise HTTPException(400, "无法读取视频文件，请上传有效的视频文件")
 
     duration_warning = None
     if duration > MAX_DURATION_SECONDS:
-        try:
-            file_path.unlink()
-        except OSError:
-            pass
+        _discard_upload(engine, file_hash, file_path)
         raise HTTPException(413, f"视频时长超过 {MAX_DURATION_SECONDS // 60} 分钟上限（当前 {duration / 60:.0f} 分钟）")
     if duration > MAX_DURATION_SECONDS * 0.8:
         duration_warning = f"视频时长 {duration/60:.0f} 分钟，处理可能需要较长时间。"
