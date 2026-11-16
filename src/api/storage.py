@@ -17,9 +17,9 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
 from ..core.engine import get_engine
@@ -139,11 +139,23 @@ async def delete_session(upload_id: str):
 
 @router.post("/api/storage/uploads/clean", tags=["storage"],
     summary="Clean uploaded videos",
-    description="Delete uploaded video files. Pass a list of hashes to clean specific files, or null to clean all.")
-async def clean_uploads(body: CleanRequest = CleanRequest()):
+    description="Delete uploaded video files. Pass {\"hashes\": [...]} to clean specific files, "
+                "or {\"hashes\": null} / an empty body to clean all. A bare list is accepted too.")
+async def clean_uploads(body: Any = Body(default=None)):
     engine = get_engine()
     upload_dir = Path(engine.config.storage.upload_dir)
-    hashes = body.hashes
+
+    # 老版本前端直接 body 里塞数组（会被 422 拒掉），两种形状都收
+    if body is None:
+        hashes = None
+    elif isinstance(body, list):
+        hashes = [str(h) for h in body]
+    elif isinstance(body, dict):
+        hashes = body.get("hashes")
+        if isinstance(hashes, str):
+            hashes = [hashes]
+    else:
+        hashes = None
 
     if not upload_dir.exists():
         return {"deleted": 0, "freed_bytes": 0, "skipped": 0}

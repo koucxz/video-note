@@ -242,7 +242,7 @@ function SettingsPage() {
     if (!confirm(t('settings.confirmClean', { count: selected.size }))) return
     setCleaning(true)
     try {
-      await api.post("/storage/uploads/clean", [...selected])
+      await api.post("/storage/uploads/clean", { hashes: [...selected] })
       setSelected(new Set())
       await loadUploads()
     } catch {
@@ -258,7 +258,7 @@ function SettingsPage() {
       return
     setCleaning(true)
     try {
-      await api.post("/storage/uploads/clean", null)
+      await api.post("/storage/uploads/clean", { hashes: null })
       setSelected(new Set())
       await loadUploads()
     } catch {
