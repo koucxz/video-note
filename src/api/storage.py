@@ -1,54 +1,140 @@
-"""Storage management API - list and clean uploaded videos."""
-import os
+"""Storage management API - list and clean uploaded videos.
+
+Two kinds of disk usage are surfaced here:
+
+1. finished uploads in `<data>/uploads` - one `{sha256[:16]}.ext` per distinct
+   video, shared by every task that used the same file (dedup by content hash);
+2. unfinished chunked sessions in `<data>/tmp_uploads/<upload_id>` - a browser
+   that closed mid-upload leaves up to a few hundred MB of parts behind. They
+   used to be invisible until the 12 h sweeper ran, which made "I uploaded a
+   video and storage shows nothing" look like a bug.
+
+Deleting a history record no longer removes the video (see api/task.py): the
+record is metadata, this page is the one place that frees disk space.
+"""
+import asyncio
+import json
+import re
+import shutil
 from pathlib import Path
 from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from ..core.engine import get_engine
 
 router = APIRouter()
 
 VALID_VIDEO_EXT = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
+_ACTIVE_STATUSES = {'processing', 'pending', 'paused'}
+_SESSION_ID_RE = re.compile(r'^[0-9a-f]{32}$')
 
 
 class CleanRequest(BaseModel):
     hashes: Optional[list[str]] = None
 
 
+def _sessions_root(upload_dir: Path) -> Path:
+    """Half-finished chunked uploads live next to (not inside) the upload dir."""
+    return upload_dir.parent / "tmp_uploads"
+
+
+def _list_sessions(upload_dir: Path) -> list[dict]:
+    root = _sessions_root(upload_dir)
+    if not root.exists():
+        return []
+
+    sessions = []
+    for child in root.iterdir():
+        if not child.is_dir() or not _SESSION_ID_RE.match(child.name):
+            continue
+        try:
+            meta = json.loads((child / "meta.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+
+        received = 0
+        parts = 0
+        for part in child.glob("p*"):
+            try:
+                received += part.stat().st_size
+                parts += 1
+            except OSError:
+                continue
+
+        total = int(meta.get("size") or 0)
+        sessions.append({
+            "upload_id": child.name,
+            "filename": meta.get("filename") or child.name,
+            "size": total,
+            "received_bytes": received,
+            "received_parts": parts,
+            "total_parts": int(meta.get("total_parts") or 0),
+            "percent": round(received * 100 / total) if total else 0,
+            "created_at": meta.get("created_at"),
+        })
+
+    sessions.sort(key=lambda s: s["received_bytes"], reverse=True)
+    return sessions
+
+
 @router.get("/api/storage/uploads", tags=["storage"],
-    summary="List uploaded videos",
-    description="List all uploaded video files with their original names and sizes.")
+    summary="List uploaded videos and unfinished uploads",
+    description="List every uploaded video file with its original name and size, plus chunked "
+                "upload sessions that never finished (they still occupy disk).")
 async def list_uploads():
     engine = get_engine()
     upload_dir = Path(engine.config.storage.upload_dir)
-    
+
     tasks = engine.checkpoint.get_all_tasks()
-    hash_to_name = {}
+    by_hash: dict[str, list[dict]] = {}
     for t in tasks:
         h = t.get("video_hash")
-        if h and h not in hash_to_name:
-            hash_to_name[h] = t["original_filename"]
-    
+        if h:
+            by_hash.setdefault(h, []).append(t)
+
     files = []
     if upload_dir.exists():
         for f in upload_dir.iterdir():
-            if f.is_file() and f.suffix.lower() in VALID_VIDEO_EXT:
-                hash_id = f.stem
-                original_name = hash_to_name.get(hash_id, f"{hash_id}{f.suffix}")
-                files.append({
-                    "hash": hash_id,
-                    "filename": original_name,
-                    "size": f.stat().st_size,
-                })
-    
+            if not (f.is_file() and f.suffix.lower() in VALID_VIDEO_EXT):
+                continue
+            hash_id = f.stem
+            owners = by_hash.get(hash_id, [])
+            named = next((o["original_filename"] for o in owners if o.get("original_filename")), None)
+            files.append({
+                "hash": hash_id,
+                "filename": named or f"{hash_id}{f.suffix}",
+                "size": f.stat().st_size,
+                "task_count": len(owners),
+                "in_use": any(o.get("status") in _ACTIVE_STATUSES for o in owners),
+            })
+
     files.sort(key=lambda x: x["size"], reverse=True)
+    sessions = _list_sessions(upload_dir)
     total_size = sum(f["size"] for f in files)
-    
+
     return {
         "files": files,
         "count": len(files),
         "total_size": total_size,
+        "sessions": sessions,
+        "session_count": len(sessions),
+        "sessions_size": sum(s["received_bytes"] for s in sessions),
     }
+
+
+@router.delete("/api/storage/sessions/{upload_id}", tags=["storage"],
+    summary="Discard an unfinished upload session")
+async def delete_session(upload_id: str):
+    engine = get_engine()
+    if not _SESSION_ID_RE.match(upload_id or ""):
+        raise HTTPException(404, "上传会话不存在")
+    session = _sessions_root(Path(engine.config.storage.upload_dir)) / upload_id
+    if not session.exists():
+        raise HTTPException(404, "上传会话不存在或已过期")
+    await asyncio.to_thread(shutil.rmtree, session, True)
+    return {"ok": True}
 
 
 @router.post("/api/storage/uploads/clean", tags=["storage"],

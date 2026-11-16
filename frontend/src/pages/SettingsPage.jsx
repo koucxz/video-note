@@ -49,6 +49,8 @@ function SettingsPage() {
   const { t } = useLang()
   const [uploads, setUploads] = useState([])
   const [totalSize, setTotalSize] = useState(0)
+  const [sessions, setSessions] = useState([])
+  const [sessionsSize, setSessionsSize] = useState(0)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(new Set())
   const [cleaning, setCleaning] = useState(false)
@@ -133,6 +135,8 @@ function SettingsPage() {
       const resp = await api.get("/storage/uploads")
       setUploads(resp.data.files || [])
       setTotalSize(resp.data.total_size || 0)
+      setSessions(resp.data.sessions || [])
+      setSessionsSize(resp.data.sessions_size || 0)
     } catch (err) {
       console.error(err)
     }
@@ -261,6 +265,16 @@ function SettingsPage() {
       alert(t('settings.cleanFailed'))
     } finally {
       setCleaning(false)
+    }
+  }
+
+  const deleteSession = async (uploadId) => {
+    if (!confirm(t('settings.confirmDiscardUpload'))) return
+    try {
+      await api.delete(`/storage/sessions/${uploadId}`)
+      await loadUploads()
+    } catch {
+      alert(t('settings.cleanFailed'))
     }
   }
 
@@ -643,7 +657,17 @@ function SettingsPage() {
                             <p className="truncate text-sm font-medium">
                               {file.filename}
                             </p>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                              {file.task_count > 0
+                                ? t('settings.fileUsedBy', { count: file.task_count })
+                                : t('settings.fileOrphan')}
+                            </p>
                           </div>
+                          {file.in_use && (
+                            <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                              {t('settings.fileInUse')}
+                            </Badge>
+                          )}
                           <span className="shrink-0 text-sm text-muted-foreground">
                             {formatSize(file.size)}
                           </span>
@@ -654,6 +678,47 @@ function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* 未完成的断点上传：浏览器中途关掉留下的分片，同样占磁盘 */}
+            {sessions.length > 0 && (
+              <Card className="mt-4">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      {t('settings.unfinishedUploads')}
+                    </CardTitle>
+                    <span className="text-sm text-muted-foreground">
+                      {sessions.length} · {formatSize(sessionsSize)}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="text-xs text-muted-foreground">{t('settings.unfinishedHint')}</p>
+                  {sessions.map((s) => (
+                    <div key={s.upload_id} className="flex items-center gap-3 rounded-lg border border-dashed p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{s.filename}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {t('settings.unfinishedProgress', {
+                            done: formatSize(s.received_bytes),
+                            total: formatSize(s.size),
+                            parts: `${s.received_parts}/${s.total_parts}`,
+                          })}
+                        </p>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-amber-500" style={{ width: `${s.percent}%` }} />
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={() => deleteSession(s.upload_id)}>
+                        <Trash2 className="mr-1.5 h-4 w-4" />
+                        {t('settings.discardUpload')}
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
 
             </TabsContent>
 

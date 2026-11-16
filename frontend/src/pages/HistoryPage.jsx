@@ -107,7 +107,7 @@ function HistoryPage() {
 
   const handleDelete = async (e, taskId) => {
     e.stopPropagation()
-    if (!confirm(t('common.confirmDelete'))) return
+    if (!confirm(t('history.confirmDeleteRecord'))) return
     try { await deleteTask(taskId) } catch { alert(t('common.deleteFailed')) }
   }
 

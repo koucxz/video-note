@@ -13,30 +13,27 @@ _ACTIVE_STATUSES = ("processing", "pending")
 
 
 def _maybe_delete_video(engine, task: dict, task_id: str) -> None:
-    """Unlink the uploaded video only when it is safe to do so.
+    """Unlink the uploaded video. Only used when the caller explicitly asks for it.
 
-    Files are deduplicated by content hash, so several tasks can point at one
-    physical `{hash}.mp4`. Deleting a task used to look for a *completed*
-    sibling only - an in-flight duplicate therefore deleted the shared file and
-    made the other task die at keyframe extraction with "No such file or
-    directory". Count every status, and cancel the task first so the worker
-    stops touching the file before it disappears.
+    Deleting a history record must NOT drop the video: the file is deduplicated
+    by content hash, so several records (or a later re-upload) point at the same
+    `{hash}.mp4`, and 设置-存储管理 is the single place that frees disk space.
+    Wiping it here made new uploads "disappear" from storage right after the
+    record was deleted, and previously killed in-flight duplicate tasks.
     """
     video_path = task.get("video_path")
     if not video_path:
         return
     video_hash = task.get("video_hash")
-    if not video_hash:
-        logger.info("Keeping %s: task %s has no video_hash", video_path, task_id)
-        return
-    try:
-        shared = engine.checkpoint.count_other_tasks_by_hash(video_hash, task_id)
-    except Exception as exc:  # noqa: BLE001 - never fail a delete on this check
-        logger.warning("Hash reference check failed for %s: %s", task_id, exc)
-        return
-    if shared:
-        logger.info("Keeping %s: %d other task(s) share hash %s", video_path, shared, video_hash)
-        return
+    if video_hash:
+        try:
+            shared = engine.checkpoint.count_other_tasks_by_hash(video_hash, task_id)
+        except Exception as exc:  # noqa: BLE001 - never fail a delete on this check
+            logger.warning("Hash reference check failed for %s: %s", task_id, exc)
+            shared = 0
+        if shared:
+            logger.info("Keeping %s: %d other task(s) share hash %s", video_path, shared, video_hash)
+            return
     if task.get("status") in _ACTIVE_STATUSES:
         try:
             engine.cancel_task(task_id)
@@ -113,10 +110,10 @@ async def rename_task(task_id: str, body: dict = Body(...)):
 
 
 @router.delete("/api/task/{task_id}", tags=["tasks"],
-    summary="Delete task and files",
-    description="Delete a task and its associated files (note and video if no other tasks reference it).")
-async def delete_task(task_id: str):
-    from pathlib import Path
+    summary="Delete task record",
+    description="Delete a task record and its note. The uploaded video stays on disk "
+                "and is freed from 设置-存储管理 (pass ?with_file=true to remove it now).")
+async def delete_task(task_id: str, with_file: bool = False):
     engine = get_engine()
     task = engine.checkpoint.get_task(task_id)
     if not task:
@@ -131,8 +128,8 @@ async def delete_task(task_id: str):
         except OSError:
             pass
     
-    # Delete video file (only if no other tasks reference it)
-    _maybe_delete_video(engine, task, task_id)
+    if with_file:
+        _maybe_delete_video(engine, task, task_id)
     
     try:
         if getattr(engine, "vector", None) is not None:
@@ -140,12 +137,11 @@ async def delete_task(task_id: str):
     except Exception:
         pass
     engine.checkpoint.delete_task(task_id)
-    return {"message": "Task and files deleted"}
+    return {"message": "Task deleted", "video_kept": not with_file}
 
 
-def _delete_one(engine, task_id: str):
-    """Delete a single task and its associated files."""
-    from pathlib import Path
+def _delete_one(engine, task_id: str, with_file: bool = False):
+    """Delete a single task record (and its note)."""
     task = engine.checkpoint.get_task(task_id)
     if not task:
         return False
@@ -158,7 +154,8 @@ def _delete_one(engine, task_id: str):
         except OSError:
             pass
 
-    _maybe_delete_video(engine, task, task_id)
+    if with_file:
+        _maybe_delete_video(engine, task, task_id)
 
     try:
         if getattr(engine, "vector", None) is not None:
@@ -171,14 +168,15 @@ def _delete_one(engine, task_id: str):
 
 @router.post("/api/tasks/batch-delete", tags=["tasks"],
     summary="Batch delete tasks",
-    description="Delete multiple tasks and their associated files by task IDs.")
+    description="Delete multiple task records by task IDs. Source videos are kept unless delete_files is true.")
 async def batch_delete_tasks(data: dict = Body(...)):
     task_ids = data.get("task_ids", [])
+    with_file = bool(data.get("delete_files"))
     if not task_ids:
         return {"deleted": 0, "total": 0}
     engine = get_engine()
     count = 0
     for tid in task_ids:
-        if _delete_one(engine, tid):
+        if _delete_one(engine, tid, with_file):
             count += 1
-    return {"deleted": count, "total": len(task_ids)}
+    return {"deleted": count, "total": len(task_ids), "video_kept": not with_file}
