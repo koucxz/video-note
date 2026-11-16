@@ -237,16 +237,26 @@ function SettingsPage() {
     else setSelected(new Set(uploads.map((f) => f.hash)))
   }
 
+  /* 失败时把服务端的 detail 带出来：422 只显示"清理失败"时根本没法查 */
+  const cleanError = (err) => {
+    const status = err?.response?.status
+    const detail = err?.response?.data?.detail
+    if (status === 422) return t('settings.cleanBadRequest')
+    const tail = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : err?.message
+    return tail ? `${t('settings.cleanFailed')}：${tail}` : t('settings.cleanFailed')
+  }
+
   const cleanSelected = async () => {
     if (!selected.size) return
     if (!confirm(t('settings.confirmClean', { count: selected.size }))) return
     setCleaning(true)
     try {
-      await api.post("/storage/uploads/clean", { hashes: [...selected] })
+      const resp = await api.post("/storage/uploads/clean", { hashes: [...selected] })
       setSelected(new Set())
       await loadUploads()
-    } catch {
-      alert(t('settings.cleanFailed'))
+      if (!resp.data?.deleted) alert(t('settings.cleanNothing'))
+    } catch (err) {
+      alert(cleanError(err))
     } finally {
       setCleaning(false)
     }
@@ -258,11 +268,12 @@ function SettingsPage() {
       return
     setCleaning(true)
     try {
-      await api.post("/storage/uploads/clean", { hashes: null })
+      const resp = await api.post("/storage/uploads/clean", { hashes: null })
       setSelected(new Set())
       await loadUploads()
-    } catch {
-      alert(t('settings.cleanFailed'))
+      if (!resp.data?.deleted) alert(t('settings.cleanNothing'))
+    } catch (err) {
+      alert(cleanError(err))
     } finally {
       setCleaning(false)
     }
@@ -273,8 +284,8 @@ function SettingsPage() {
     try {
       await api.delete(`/storage/sessions/${uploadId}`)
       await loadUploads()
-    } catch {
-      alert(t('settings.cleanFailed'))
+    } catch (err) {
+      alert(cleanError(err))
     }
   }
 

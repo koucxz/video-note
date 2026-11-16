@@ -288,6 +288,8 @@
     "confirmClean": "确定删除选中的 {{count}} 个上传文件？",
     "confirmCleanAll": "确定删除全部 {{count}} 个上传文件（{{size}}）？",
     "cleanFailed": "清理失败",
+    "cleanBadRequest": "清理请求被服务端拒绝（版本不一致），请刷新页面重试",
+    "cleanNothing": "这些文件在服务端已经不存在，列表已刷新",
     "cleanSelected": "清理选中项",
     "cleanAll": "清理全部",
     "noUploads": "暂无上传文件",

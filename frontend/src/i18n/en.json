@@ -288,6 +288,8 @@
     "confirmClean": "Delete {{count}} selected uploads?",
     "confirmCleanAll": "Delete all {{count}} uploads ({{size}})?",
     "cleanFailed": "Cleanup failed",
+    "cleanBadRequest": "The server rejected the cleanup request (stale page). Refresh and retry.",
+    "cleanNothing": "Those files no longer exist on the server; the list has been refreshed.",
     "cleanSelected": "Clean Selected",
     "cleanAll": "Clean All",
     "noUploads": "No uploaded files",
