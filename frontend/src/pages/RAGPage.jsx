@@ -1,6 +1,8 @@
 import { memo, useState, useRef, useEffect } from "react"
 import { Send, Loader2, Bot, User, FileText, BookOpen, Plus, Pencil, Trash2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
+import { normalizeMarkdown } from "../lib/markdown"
 import {
   ragAsk, ragAskStream, getHistoryAll,
   getRagSessions, getRagSession, renameRagSession, deleteRagSession,
@@ -75,7 +77,7 @@ const MessageRow = memo(function MessageRow({ message, t }) {
         {message.role === "user" ? <p className="whitespace-pre-wrap">{message.content}</p> : (
           <>
             <ThinkingText content={message.thinking} done={message.thinking === message.fullThinking} t={t} />
-            <article className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{message.content}</ReactMarkdown></article>
+            <article className="note-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(message.content)}</ReactMarkdown></article>
             {message.sources?.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{message.sources.map((source, sourceIndex) => <Badge key={sourceIndex} variant="outline" className="text-xs"><FileText className="mr-1 h-3 w-3" />{source.title?.substring(0, 30)}</Badge>)}</div>}
           </>
         )}

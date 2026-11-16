@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { normalizeMarkdown } from "../lib/markdown"
 import { downloadNotePdf, downloadNoteWord, downloadNoteHtml, getHistoryAll } from "../api/client"
 import { useNoteStore } from "../stores/noteStore"
 import { useNoteStyles } from "../hooks/useNoteStyles"
@@ -188,7 +189,17 @@ function NotePage() {
                       <textarea value={editContent} onChange={e => useNoteStore.setState({ editContent: e.target.value })} className="min-h-[400px] w-full rounded-lg border bg-background p-4 font-mono text-sm leading-relaxed outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   ) : (
-                    <article className="note-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown></article>
+                    <article className="note-markdown">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          // 表格横向滚动放到外层容器，table 保持原生表格布局（列才对得齐）
+                          table: ({ node, ...props }) => (
+                            <div className="table-wrap"><table {...props} /></div>
+                          ),
+                        }}
+                      >{normalizeMarkdown(note.content)}</ReactMarkdown>
+                    </article>
                   )}
                 </CardContent></Card>
               </>
